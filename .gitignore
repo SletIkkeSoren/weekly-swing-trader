@@ -1,0 +1,27 @@
+# Secrets
+.envrc
+
+# Pipeline runtime output
+/tmp/
+/data/
+snapshots.json
+consensus.json
+approved.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/settings.json
+.idea/

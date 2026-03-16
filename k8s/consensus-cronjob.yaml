@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: consensus
+  namespace: swing-trader
+spec:
+  # 30 minutes after fetcher (21:30 UTC Mon–Fri)
+  schedule: "30 21 * * 1-5"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: consensus
+              image: swing-trader/consensus:latest
+              command: ["python", "-m", "consensus.main"]
+              env:
+                - name: ANTHROPIC_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-credentials
+                      key: anthropic_api_key
+                - name: OPENAI_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-credentials
+                      key: openai_api_key
+                - name: GOOGLE_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-credentials
+                      key: google_api_key
+                - name: INPUT_DIR
+                  value: "/data/fetcher"
+                - name: OUTPUT_DIR
+                  value: "/data/consensus"
+              volumeMounts:
+                - name: pipeline-data
+                  mountPath: /data
+          volumes:
+            - name: pipeline-data
+              persistentVolumeClaim:
+                claimName: pipeline-data-pvc
+---
+# kubectl create secret generic llm-credentials \
+#   --from-literal=anthropic_api_key=<KEY> \
+#   --from-literal=openai_api_key=<KEY> \
+#   --from-literal=google_api_key=<KEY> \
+#   -n swing-trader

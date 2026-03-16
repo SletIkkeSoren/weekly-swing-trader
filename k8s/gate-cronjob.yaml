@@ -1,0 +1,67 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gate
+  namespace: swing-trader
+spec:
+  # 30 minutes after consensus (22:00 UTC Mon–Fri)
+  schedule: "0 22 * * 1-5"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0  # no retries — approval webhooks must not fire twice
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: gate
+              image: swing-trader/gate:latest
+              command: ["python", "-m", "gate.main"]
+              env:
+                - name: INPUT_DIR
+                  value: "/data/consensus"
+                - name: OUTPUT_DIR
+                  value: "/data/gate"
+                - name: ACCOUNT_SIZE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: gate-config
+                      key: account_size
+                - name: MIN_CONFIDENCE
+                  value: "0.65"
+                - name: MIN_AGREEMENT
+                  value: "2"
+                - name: MAX_OPEN_TRADES
+                  value: "3"
+                - name: RISK_PCT
+                  value: "0.01"
+                - name: MAX_CONTRACTS
+                  value: "5"
+                - name: APPROVAL_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-secrets
+                      key: approval_webhook_url
+                - name: WEBHOOK_TIMEOUT_SECS
+                  value: "300"
+              volumeMounts:
+                - name: pipeline-data
+                  mountPath: /data
+          volumes:
+            - name: pipeline-data
+              persistentVolumeClaim:
+                claimName: pipeline-data-pvc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gate-config
+  namespace: swing-trader
+data:
+  account_size: "10000"
+---
+# kubectl create secret generic gate-secrets \
+#   --from-literal=approval_webhook_url=https://your-webhook-url \
+#   -n swing-trader

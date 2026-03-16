@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: fetcher
+  namespace: swing-trader
+spec:
+  # Every Monday–Friday at 21:00 UTC (after US market close)
+  schedule: "0 21 * * 1-5"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: fetcher
+              image: swing-trader/fetcher:latest
+              command: ["python", "-m", "fetcher.main"]
+              env:
+                - name: ALPACA_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-credentials
+                      key: api_key
+                - name: ALPACA_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-credentials
+                      key: secret_key
+                - name: ALPACA_BASE_URL
+                  value: "https://paper-api.alpaca.markets"
+                - name: TICKERS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: fetcher-config
+                      key: tickers
+                - name: LOOKBACK_DAYS
+                  value: "252"
+                - name: OUTPUT_DIR
+                  value: "/data/fetcher"
+              volumeMounts:
+                - name: pipeline-data
+                  mountPath: /data
+          volumes:
+            - name: pipeline-data
+              persistentVolumeClaim:
+                claimName: pipeline-data-pvc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fetcher-config
+  namespace: swing-trader
+data:
+  tickers: "SPY,QQQ,AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL"
+---
+# kubectl create secret generic alpaca-credentials \
+#   --from-literal=api_key=<KEY> \
+#   --from-literal=secret_key=<SECRET> \
+#   -n swing-trader
