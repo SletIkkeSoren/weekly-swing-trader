@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.envrc
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+tools/
+k8s/
+*.md

@@ -15,8 +15,8 @@ class TradeProposal(BaseModel):
     """A consensus result that cleared all risk filters, pending human approval."""
     ticker: str
     action: Action
-    strike: float
-    expiry: date
+    strike: float | None = None   # None for CLOSE (executor resolves from live position)
+    expiry: date | None = None    # None for CLOSE
     confidence: float
     agreement_count: int
     suggested_contracts: int

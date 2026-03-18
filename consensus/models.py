@@ -3,7 +3,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Action = Literal["BUY_CALL", "BUY_PUT", "HOLD"]
+from fetcher.models import OpenPosition
+
+Action = Literal["BUY_CALL", "BUY_PUT", "CLOSE", "HOLD"]
 
 
 class ModelVote(BaseModel):
@@ -33,6 +35,7 @@ class ConsensusResult(BaseModel):
     agreement_count: int = 0
     all_reasoning: list[str] = Field(default_factory=list)
     all_invalidating_conditions: list[str] = Field(default_factory=list)
+    open_positions: list[OpenPosition] = Field(default_factory=list)
 
     # True when >= 2 models agree on a non-HOLD action — this is the gate for
     # the next pipeline stage

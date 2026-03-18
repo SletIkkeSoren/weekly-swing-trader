@@ -50,9 +50,25 @@ class TechnicalIndicators(BaseModel):
     nearest_resistance: Optional[float] = None
 
 
+class OpenPosition(BaseModel):
+    """An open option position held on the account."""
+    ticker: str               # underlying, e.g. "TSLA"
+    occ_symbol: str           # full OCC symbol, e.g. "TSLA240119C00250000"
+    option_type: str          # "call" or "put"
+    qty: int
+    avg_entry_price: float
+    current_price: float
+    pnl_pct: float            # decimal: -0.55 = down 55%, 1.50 = up 150%
+    days_to_expiry: int
+
+
 class MarketSnapshot(BaseModel):
     ticker: str
     as_of: datetime = Field(description="UTC timestamp of when data was fetched")
     latest_close: float
     bars: list[OHLCVBar] = Field(description="Daily bars, oldest-first, full lookback")
     indicators: TechnicalIndicators
+    open_positions: list[OpenPosition] = Field(
+        default_factory=list,
+        description="Open option positions for this ticker at time of fetch",
+    )

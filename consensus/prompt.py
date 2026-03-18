@@ -13,19 +13,22 @@ from datetime import date, timedelta
 from fetcher.models import MarketSnapshot
 
 SYSTEM_PROMPT = """You are a quantitative options analyst. You will be given market data
-for a single equity: recent OHLCV bars and pre-computed technical indicators.
+for a single equity: recent OHLCV bars, pre-computed technical indicators, and any
+open option positions currently held.
 
 RULES:
 - Reason ONLY from the data provided. Do not recall or infer any market facts from
   your training data (earnings dates, analyst ratings, news, etc.).
 - Your entire response must be a single valid JSON object matching the schema below.
 - If the data is insufficient or ambiguous, set action to "HOLD".
+- If open positions are shown and the data no longer supports the original thesis,
+  set action to "CLOSE" (null strike and expiry — the system resolves the contract).
 
 OUTPUT SCHEMA (respond with nothing but this JSON):
 {
-  "action": "BUY_CALL" | "BUY_PUT" | "HOLD",
-  "strike": <float — nearest $1 increment to your target, null if HOLD>,
-  "expiry": "<YYYY-MM-DD — nearest or next Friday, null if HOLD>",
+  "action": "BUY_CALL" | "BUY_PUT" | "CLOSE" | "HOLD",
+  "strike": <float — nearest $1 increment to your target, null if CLOSE or HOLD>,
+  "expiry": "<YYYY-MM-DD — nearest or next Friday, null if CLOSE or HOLD>",
   "confidence": <float 0.0–1.0>,
   "reasoning": ["<concise point>", ...],
   "invalidating_conditions": ["<condition that would make this trade wrong>", ...]
@@ -54,11 +57,29 @@ def build_user_message(snapshot: MarketSnapshot) -> str:
     nearest_friday = next_friday()
     following_friday = next_friday(nearest_friday + timedelta(days=1))
 
+    positions_section = ""
+    if snapshot.open_positions:
+        lines = []
+        for pos in snapshot.open_positions:
+            pnl_sign = "+" if pos.pnl_pct >= 0 else ""
+            lines.append(
+                f"  {pos.occ_symbol} — {pos.qty} contract(s) @ ${pos.avg_entry_price:.2f} avg\n"
+                f"  Current: ${pos.current_price:.2f} ({pnl_sign}{pos.pnl_pct:.0%}) | "
+                f"Days to expiry: {pos.days_to_expiry}"
+            )
+        positions_section = (
+            "\n--- OPEN POSITIONS ---\n"
+            + "\n".join(lines)
+            + "\n\n"
+            "ACTION CONSTRAINT: A position is already held. "
+            "You must output CLOSE or HOLD only — do not output BUY_CALL or BUY_PUT.\n"
+        )
+
     return f"""
 TICKER: {snapshot.ticker}
 AS OF:  {snapshot.as_of.date()}
 CLOSE:  {snapshot.latest_close:.2f}
-
+{positions_section}
 --- RECENT PRICE ACTION (last 20 sessions) ---
 {bars_table}
 

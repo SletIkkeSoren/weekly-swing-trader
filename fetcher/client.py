@@ -1,15 +1,16 @@
 """
-Alpaca REST client wrapper for OHLCV bar fetching.
+Alpaca REST client wrapper for OHLCV bar fetching and position queries.
 """
 
-from datetime import date, timedelta
+import re
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import alpaca_trade_api as tradeapi
 from alpaca_trade_api.rest import TimeFrame
 
 from fetcher.config import Config
-from fetcher.models import OHLCVBar
+from fetcher.models import OHLCVBar, OpenPosition
 
 
 class AlpacaClient:
@@ -59,3 +60,40 @@ class AlpacaClient:
                 )
             )
         return bars
+
+    def fetch_open_positions(self) -> list[OpenPosition]:
+        """Return all open US option positions on the account."""
+        raw = self._api.list_positions()
+        positions: list[OpenPosition] = []
+        today = datetime.now(timezone.utc).date()
+
+        for pos in raw:
+            if getattr(pos, "asset_class", None) != "us_option":
+                continue
+
+            occ_symbol: str = pos.symbol
+            m = re.match(r"([A-Z]+)(\d{2})(\d{2})(\d{2})([CP])", occ_symbol)
+            if not m:
+                continue
+            ticker, yy, mm, dd, opt_char = m.groups()
+            expiry = date(2000 + int(yy), int(mm), int(dd))
+            option_type = "call" if opt_char == "C" else "put"
+            dte = (expiry - today).days
+
+            avg_price = float(pos.avg_entry_price)
+            curr_price = float(pos.current_price)
+            pnl_pct = (curr_price - avg_price) / avg_price if avg_price else 0.0
+
+            positions.append(
+                OpenPosition(
+                    ticker=ticker,
+                    occ_symbol=occ_symbol,
+                    option_type=option_type,
+                    qty=abs(int(float(pos.qty))),
+                    avg_entry_price=avg_price,
+                    current_price=curr_price,
+                    pnl_pct=pnl_pct,
+                    days_to_expiry=max(0, dte),
+                )
+            )
+        return positions

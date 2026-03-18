@@ -38,6 +38,7 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
         votes=votes,
         all_reasoning=[r for v in votes for r in v.reasoning],
         all_invalidating_conditions=[c for v in votes for c in v.invalidating_conditions],
+        open_positions=snapshot.open_positions,
     )
 
     if not votes:
@@ -63,12 +64,13 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
         result.consensus_expiry = max(expiries) if expiries else None
         result.passed = True
 
+    strike_str = f"{result.consensus_strike:.2f}" if result.consensus_strike else "n/a"
     log.info(
-        "[%s] Consensus: %s  strike=%.2f  expiry=%s  confidence=%.2f  agreement=%d/3",
+        "[%s] Consensus: %s  strike=%s  expiry=%s  confidence=%.2f  agreement=%d/3",
         snapshot.ticker,
         result.consensus_action,
-        result.consensus_strike or 0,
-        result.consensus_expiry,
+        strike_str,
+        result.consensus_expiry or "n/a",
         result.consensus_confidence or 0,
         result.agreement_count,
     )

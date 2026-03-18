@@ -1,16 +1,51 @@
 """
 Risk filters applied before a trade is sent for human approval.
 Each filter returns a FilterResult — first failure short-circuits the chain.
+
+Hard exit rules (check_hard_exits) fire unconditionally on open positions,
+bypassing the normal consensus flow entirely.
 """
 
 import math
 
 from consensus.models import ConsensusResult
+from fetcher.models import OpenPosition
 from gate.config import Config
 from gate.models import FilterResult
 
+# Hard exit thresholds
+_STOP_LOSS_PCT = -0.50    # force CLOSE if down 50% or more
+_TAKE_PROFIT_PCT = 1.50   # force CLOSE if up 150% or more
+_MIN_DTE = 2              # force CLOSE if 2 or fewer days to expiry
+
+
+def check_hard_exits(
+    open_positions: list[OpenPosition], cfg: Config
+) -> list[tuple[OpenPosition, str]]:
+    """Return (position, reason) pairs for positions that must be closed immediately.
+
+    These rules fire regardless of model consensus.
+    """
+    forced: list[tuple[OpenPosition, str]] = []
+    for pos in open_positions:
+        if pos.pnl_pct <= _STOP_LOSS_PCT:
+            forced.append((pos, f"stop-loss triggered: down {pos.pnl_pct:.0%}"))
+        elif pos.days_to_expiry <= _MIN_DTE:
+            forced.append((pos, f"expiry risk: {pos.days_to_expiry}d to expiry"))
+        elif pos.pnl_pct >= _TAKE_PROFIT_PCT:
+            forced.append((pos, f"take-profit triggered: up {pos.pnl_pct:.0%}"))
+    return forced
+
 
 def run_all(result: ConsensusResult, cfg: Config, open_trade_count: int) -> FilterResult:
+    # CLOSE actions skip strike sanity and open-trade cap (they reduce exposure)
+    if result.consensus_action == "CLOSE":
+        for check in (_confidence, _agreement):
+            fr = check(result, cfg, open_trade_count)
+            if not fr.passed:
+                return fr
+        return FilterResult(passed=True, reason="ok")
+
     for check in (_confidence, _agreement, _open_trades, _strike_sanity):
         fr = check(result, cfg, open_trade_count)
         if not fr.passed:
@@ -18,17 +53,13 @@ def run_all(result: ConsensusResult, cfg: Config, open_trade_count: int) -> Filt
     return FilterResult(passed=True, reason="ok")
 
 
-def suggested_contracts(result: ConsensusResult, cfg: Config) -> int:
+def suggested_contracts(cfg: Config) -> int:
     """
     Risk-based sizing: risk at most (account_size * risk_pct) per trade.
-    Uses ATR as a proxy for premium cost floor: contracts = risk_usd / (atr * 100).
+    Conservative floor of $200/contract; executor refines against actual option chain.
     Clamped to [1, max_contracts].
     """
     risk_usd = cfg.account_size * cfg.risk_pct
-    # ATR * 100 = approx cost of one contract at-the-money (rough floor estimate)
-    # The executor will refine this against the actual option chain
-    atr = result.votes[0].strike  # placeholder — use close-to-strike delta as proxy
-    # Simpler and more robust: just use fixed risk_usd / 200 as a conservative floor
     raw = math.floor(risk_usd / 200)
     return max(1, min(raw, cfg.max_contracts))
 

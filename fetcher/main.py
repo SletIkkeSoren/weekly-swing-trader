@@ -30,6 +30,18 @@ def run(cfg: Config) -> list[MarketSnapshot]:
     client = AlpacaClient(cfg)
     snapshots: list[MarketSnapshot] = []
 
+    # Fetch open positions once for all tickers
+    try:
+        all_positions = client.fetch_open_positions()
+        log.info("Fetched %d open option position(s)", len(all_positions))
+    except Exception:
+        log.exception("Failed to fetch open positions — continuing without position data")
+        all_positions = []
+
+    positions_by_ticker: dict[str, list] = {}
+    for pos in all_positions:
+        positions_by_ticker.setdefault(pos.ticker, []).append(pos)
+
     for ticker in cfg.tickers:
         try:
             log.info("Fetching %s", ticker)
@@ -41,14 +53,16 @@ def run(cfg: Config) -> list[MarketSnapshot]:
                 latest_close=bars[-1].close,
                 bars=bars,
                 indicators=indicators,
+                open_positions=positions_by_ticker.get(ticker, []),
             )
             snapshots.append(snapshot)
             log.info(
-                "%s — close=%.2f rsi=%.1f hv20=%.1f%%",
+                "%s — close=%.2f rsi=%.1f hv20=%.1f%% open_positions=%d",
                 ticker,
                 snapshot.latest_close,
                 snapshot.indicators.rsi_14,
                 snapshot.indicators.hv_20 * 100,
+                len(snapshot.open_positions),
             )
         except Exception:
             log.exception("Failed to process %s — skipping", ticker)
