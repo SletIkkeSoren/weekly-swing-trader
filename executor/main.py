@@ -11,6 +11,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
+import httpx
 from dotenv import load_dotenv
 
 from executor.client import AlpacaOptionsClient
@@ -28,8 +29,37 @@ log = logging.getLogger("executor")
 _ACTION_TO_OPTION_TYPE = {"BUY_CALL": "call", "BUY_PUT": "put"}
 
 
+def _notify_fill(result: ExecutionResult, cfg: Config) -> None:
+    """Post a compact fill notification to Discord. Best-effort — never raises."""
+    if not cfg.discord_webhook_url:
+        return
+    action_emoji = "📈" if result.action == "BUY_CALL" else ("📉" if result.action == "BUY_PUT" else "🔄")
+    color = 0x2ECC71 if result.action == "BUY_CALL" else (0xE74C3C if result.action == "BUY_PUT" else 0x95A5A6)
+    price_str = f"${result.limit_price:.2f}" if result.limit_price else "market"
+    fields = [
+        {"name": "Symbol",    "value": result.occ_symbol or result.ticker, "inline": True},
+        {"name": "Contracts", "value": str(result.contracts),              "inline": True},
+        {"name": "Price",     "value": price_str,                          "inline": True},
+    ]
+    if result.order_id:
+        fields.append({"name": "Order ID", "value": result.order_id, "inline": False})
+    embed = {
+        "embeds": [{
+            "title": f"{action_emoji} FILLED — {result.ticker} {result.action}",
+            "color": color,
+            "fields": fields,
+            "footer": {"text": f"status: {result.status}"},
+            "timestamp": result.executed_at.isoformat(),
+        }]
+    }
+    try:
+        httpx.post(cfg.discord_webhook_url, json=embed, timeout=10).raise_for_status()
+    except Exception:
+        log.warning("Discord fill notification failed for %s", result.ticker)
+
+
 def execute_close(
-    trade: ApprovedTrade, client: AlpacaOptionsClient, cfg: Config
+    trade: ApprovedTrade, client: AlpacaOptionsClient, cfg: Config,
 ) -> list[ExecutionResult]:
     """Sell-to-close all open option contracts for the ticker.
 
@@ -77,11 +107,13 @@ def execute_close(
                 "[%s] Close submitted: %s id=%s status=%s",
                 p.ticker, occ_symbol, order.get("id"), order.get("status"),
             )
-            results.append(ExecutionResult(
+            r = ExecutionResult(
                 ticker=p.ticker, occ_symbol=occ_symbol, action="CLOSE",
                 contracts=qty, order_id=order.get("id"), order_type="market",
                 status="submitted", executed_at=now,
-            ))
+            )
+            _notify_fill(r, cfg)
+            results.append(r)
         except Exception as exc:
             log.error("[%s] Close failed for %s: %s", p.ticker, occ_symbol, exc)
             results.append(ExecutionResult(
@@ -167,13 +199,15 @@ def execute_trade(
         )
 
     log.info("[%s] Order submitted: id=%s status=%s", p.ticker, order.get("id"), order.get("status"))
-    return ExecutionResult(
+    result = ExecutionResult(
         ticker=p.ticker, occ_symbol=occ_symbol, action=p.action,
         strike=actual_strike, expiry=str(p.expiry),
         contracts=p.suggested_contracts, order_id=order.get("id"),
         order_type=order_type, limit_price=limit_price,
         status="submitted", executed_at=now,
     )
+    _notify_fill(result, cfg)
+    return result
 
 
 def main() -> None:

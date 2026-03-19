@@ -12,6 +12,7 @@ class Config:
     order_type: str      # "market" or "limit"
     limit_buffer: float  # multiplier on ask for limit price, e.g. 1.05
     dry_run: bool
+    discord_webhook_url: str  # optional; empty = no fill notifications
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -24,4 +25,5 @@ class Config:
             order_type=os.getenv("ORDER_TYPE", "limit"),
             limit_buffer=float(os.getenv("LIMIT_PRICE_BUFFER", "1.05")),
             dry_run=os.getenv("DRY_RUN", "false").lower() == "true",
+            discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", ""),
         )

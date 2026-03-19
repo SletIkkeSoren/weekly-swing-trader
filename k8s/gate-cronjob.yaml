@@ -4,8 +4,8 @@ metadata:
   name: gate
   namespace: swing-trader
 spec:
-  # 30 minutes after consensus (22:00 UTC Mon–Fri)
-  schedule: "0 22 * * 1-5"
+  # 30 minutes after fetcher each hour (15:30–20:30 UTC Mon–Fri)
+  schedule: "30 15-22 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,7 +19,7 @@ spec:
             - name: ghcr-pull-secret
           containers:
             - name: gate
-              image: ghcr.io/SletIkkeSoren/weekly-swing-trader:latest
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
               command: ["python", "-m", "gate.main"]
               env:
                 - name: INPUT_DIR

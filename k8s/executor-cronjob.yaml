@@ -4,8 +4,8 @@ metadata:
   name: executor
   namespace: swing-trader
 spec:
-  # 15 minutes after gate (22:15 UTC Mon–Fri)
-  schedule: "15 22 * * 1-5"
+  # 45 minutes after fetcher each hour (15:45–20:45 UTC Mon–Fri)
+  schedule: "45 15-22 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,7 +19,7 @@ spec:
             - name: ghcr-pull-secret
           containers:
             - name: executor
-              image: ghcr.io/SletIkkeSoren/weekly-swing-trader:latest
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
               command: ["python", "-m", "executor.main"]
               env:
                 - name: INPUT_DIR
@@ -44,6 +44,11 @@ spec:
                   value: "1.05"
                 - name: DRY_RUN
                   value: "false"
+                - name: DISCORD_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-secrets
+                      key: approval_webhook_url
               volumeMounts:
                 - name: pipeline-data
                   mountPath: /data

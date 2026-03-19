@@ -35,22 +35,23 @@ def _discord_embed(proposal: TradeProposal) -> dict:
     action_emoji = "📈" if proposal.action == "BUY_CALL" else "📉"
     color = 0x2ECC71 if proposal.action == "BUY_CALL" else 0xE74C3C  # green / red
 
-    reasoning = "\n".join(f"• {r}" for r in proposal.all_reasoning) or "—"
-    conditions = "\n".join(f"• {c}" for c in proposal.all_invalidating_conditions) or "—"
+    # One-line summaries: first reasoning point + first invalidating condition
+    reasoning = proposal.all_reasoning[0] if proposal.all_reasoning else "—"
+    condition = proposal.all_invalidating_conditions[0] if proposal.all_invalidating_conditions else "—"
 
     return {
         "embeds": [{
             "title": f"{action_emoji} {proposal.ticker} — {proposal.action}",
             "color": color,
             "fields": [
-                {"name": "Strike",     "value": f"${proposal.strike:.2f}",          "inline": True},
-                {"name": "Expiry",     "value": str(proposal.expiry),                "inline": True},
-                {"name": "Contracts",  "value": str(proposal.suggested_contracts),   "inline": True},
-                {"name": "Confidence", "value": f"{proposal.confidence:.0%}",        "inline": True},
+                {"name": "Strike",     "value": f"${proposal.strike:.2f}",             "inline": True},
+                {"name": "Expiry",     "value": str(proposal.expiry),                   "inline": True},
+                {"name": "Contracts",  "value": str(proposal.suggested_contracts),      "inline": True},
+                {"name": "Confidence", "value": f"{proposal.confidence:.0%}",           "inline": True},
                 {"name": "Agreement",  "value": f"{proposal.agreement_count}/3 models", "inline": True},
-                {"name": "Risk (USD)", "value": f"${proposal.risk_usd:.0f}",         "inline": True},
-                {"name": "Reasoning",            "value": reasoning[:1024]},
-                {"name": "Invalidating conditions", "value": conditions[:1024]},
+                {"name": "Risk (USD)", "value": f"${proposal.risk_usd:.0f}",            "inline": True},
+                {"name": "Thesis",     "value": reasoning[:256]},
+                {"name": "Watch if",   "value": condition[:256]},
             ],
             "footer": {"text": "paper trading — auto-approved"},
             "timestamp": proposal.as_of.isoformat(),

@@ -4,8 +4,8 @@ metadata:
   name: fetcher
   namespace: swing-trader
 spec:
-  # Every Monday–Friday at 21:00 UTC (after US market close)
-  schedule: "0 21 * * 1-5"
+  # Every hour during market hours: Mon–Fri 15:00–20:00 UTC (10 AM–3 PM ET)
+  schedule: "0 15-22 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -19,7 +19,7 @@ spec:
             - name: ghcr-pull-secret
           containers:
             - name: fetcher
-              image: ghcr.io/SletIkkeSoren/weekly-swing-trader:latest
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
               command: ["python", "-m", "fetcher.main"]
               env:
                 - name: ALPACA_API_KEY
