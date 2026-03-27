@@ -22,7 +22,7 @@ from consensus.models import ConsensusResult
 from gate.config import Config
 from gate.filters import check_hard_exits, run_all, suggested_contracts
 from gate.models import ApprovedTrade, TradeProposal
-from gate.webhook import request_approval
+from gate.webhook import _discord_embed, request_approval
 
 load_dotenv()
 logging.basicConfig(
@@ -32,14 +32,22 @@ logging.basicConfig(
 log = logging.getLogger("gate")
 
 
-async def _notify_hard_exit(proposal: TradeProposal, cfg: Config) -> None:
-    """Best-effort Discord notification for hard exits. Never blocks or raises."""
+async def _discord_notify(payload: dict, cfg: Config, ticker: str, label: str) -> None:
+    """Best-effort Discord POST. Never blocks or raises."""
     if not cfg.webhook_url or "discord.com/api/webhooks" not in cfg.webhook_url:
         return
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(cfg.webhook_url, json=payload)
+    except Exception:
+        log.warning("[%s] Discord notification failed (%s)", ticker, label)
+
+
+async def _notify_hard_exit(proposal: TradeProposal, cfg: Config) -> None:
     embed = {
         "embeds": [{
             "title": f"🚨 {proposal.ticker} — HARD EXIT",
-            "color": 0xE67E22,  # orange — distinct from buy (green) and put (red)
+            "color": 0xE67E22,
             "fields": [
                 {"name": "Reason", "value": proposal.all_reasoning[0], "inline": False},
                 {"name": "Contracts", "value": str(proposal.suggested_contracts), "inline": True},
@@ -48,11 +56,11 @@ async def _notify_hard_exit(proposal: TradeProposal, cfg: Config) -> None:
             "timestamp": proposal.as_of.isoformat(),
         }]
     }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(cfg.webhook_url, json=embed)
-    except Exception:
-        log.warning("[%s] Hard exit Discord notification failed", proposal.ticker)
+    await _discord_notify(embed, cfg, proposal.ticker, "hard exit")
+
+
+async def _notify_consensus_close(proposal: TradeProposal, cfg: Config) -> None:
+    await _discord_notify(_discord_embed(proposal), cfg, proposal.ticker, "consensus close")
 
 
 async def main_async() -> None:
@@ -143,9 +151,20 @@ async def main_async() -> None:
             proposal.risk_usd,
         )
 
-        trade = await request_approval(proposal, cfg)
-        if trade:
+        if proposal.action == "CLOSE":
+            # Close decisions are self-determined — no human approval needed.
+            # The system already required 2/3 model consensus to get here.
+            trade = ApprovedTrade(
+                proposal=proposal,
+                approved_at=datetime.now(timezone.utc),
+                webhook_reason="consensus CLOSE auto-approved",
+            )
+            await _notify_consensus_close(proposal, cfg)
             approved.append(trade)
+        else:
+            trade = await request_approval(proposal, cfg)
+            if trade:
+                approved.append(trade)
 
     log.info("%d/%d trades approved", len(approved), len(results))
     audit.record_approved(approved)
