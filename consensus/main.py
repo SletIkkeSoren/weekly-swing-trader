@@ -49,13 +49,16 @@ async def main_async() -> None:
         len(passed), len(results),
     )
 
+    # Write ALL results (passed and non-passed) so the gate can check hard exits
+    # on every open position regardless of model consensus. The gate's filter
+    # chain rejects non-passed results in Phase 2.
     os.makedirs(cfg.output_dir, exist_ok=True)
     out_path = os.path.join(cfg.output_dir, "consensus.json")
-    payload = [r.model_dump(mode="json") for r in passed]
+    payload = [r.model_dump(mode="json") for r in results]
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
-    log.info("Wrote %d passed results to %s", len(passed), out_path)
-    audit.record_consensus(results)  # audit all results, not just passed
+    log.info("Wrote %d results (%d passed) to %s", len(results), len(passed), out_path)
+    audit.record_consensus(results)
 
     print(json.dumps(payload, indent=2, default=str))
 
