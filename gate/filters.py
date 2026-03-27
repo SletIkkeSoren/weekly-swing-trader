@@ -67,10 +67,11 @@ def suggested_contracts(cfg: Config) -> int:
 # ── Individual filters ─────────────────────────────────────────────────────
 
 def _confidence(result: ConsensusResult, cfg: Config, _: int) -> FilterResult:
-    if (result.consensus_confidence or 0) < cfg.min_confidence:
+    confidence = result.consensus_confidence or 0.0
+    if confidence < cfg.min_confidence:
         return FilterResult(
             passed=False,
-            reason=f"confidence {result.consensus_confidence:.2f} < min {cfg.min_confidence}",
+            reason=f"confidence {confidence:.2f} < min {cfg.min_confidence}",
         )
     return FilterResult(passed=True, reason="ok")
 
