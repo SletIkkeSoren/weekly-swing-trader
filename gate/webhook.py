@@ -32,20 +32,26 @@ def _is_discord(url: str) -> bool:
 
 
 def _discord_embed(proposal: TradeProposal) -> dict:
-    action_emoji = "📈" if proposal.action == "BUY_CALL" else "📉"
-    color = 0x2ECC71 if proposal.action == "BUY_CALL" else 0xE74C3C  # green / red
+    if proposal.action == "BUY_CALL":
+        action_emoji, color = "📈", 0x2ECC71   # green
+    elif proposal.action == "BUY_PUT":
+        action_emoji, color = "📉", 0xE74C3C   # red
+    else:
+        action_emoji, color = "🔄", 0x95A5A6   # grey — CLOSE / HOLD
 
-    # One-line summaries: first reasoning point + first invalidating condition
     reasoning = proposal.all_reasoning[0] if proposal.all_reasoning else "—"
     condition = proposal.all_invalidating_conditions[0] if proposal.all_invalidating_conditions else "—"
+
+    strike_str = f"${proposal.strike:.2f}" if proposal.strike is not None else "n/a"
+    expiry_str = str(proposal.expiry) if proposal.expiry is not None else "n/a"
 
     return {
         "embeds": [{
             "title": f"{action_emoji} {proposal.ticker} — {proposal.action}",
             "color": color,
             "fields": [
-                {"name": "Strike",     "value": f"${proposal.strike:.2f}",             "inline": True},
-                {"name": "Expiry",     "value": str(proposal.expiry),                   "inline": True},
+                {"name": "Strike",     "value": strike_str,                             "inline": True},
+                {"name": "Expiry",     "value": expiry_str,                             "inline": True},
                 {"name": "Contracts",  "value": str(proposal.suggested_contracts),      "inline": True},
                 {"name": "Confidence", "value": f"{proposal.confidence:.0%}",           "inline": True},
                 {"name": "Agreement",  "value": f"{proposal.agreement_count}/3 models", "inline": True},

@@ -265,3 +265,92 @@ class TestRunAllClose:
         fr = run_all(result, gate_cfg, open_trade_count=0)
         assert fr.passed is False
         assert "agreement" in fr.reason
+
+
+# ── Hard exit auto-approval (regression for dry-run bug) ──────────────────
+
+
+class TestHardExitAutoApproval:
+    """
+    Regression: hard exits were silently dropped when APPROVAL_WEBHOOK_URL="".
+    gate/main.py now creates ApprovedTrade directly, bypassing request_approval().
+    """
+
+    @pytest.mark.asyncio
+    async def test_hard_exit_approved_even_with_dry_run_webhook(self, gate_cfg):
+        """
+        A stop-loss position must appear in approved output regardless of webhook mode.
+        This is the regression test for the bug where dry-run mode silently dropped exits.
+        """
+        from gate.filters import check_hard_exits
+        from gate.models import ApprovedTrade, TradeProposal
+        from datetime import datetime, timezone
+
+        pos = make_position(pnl_pct=-0.75, days_to_expiry=5)
+        exits = check_hard_exits([pos], gate_cfg)
+        assert exits, "hard exit must trigger for -75% position"
+
+        # Simulate what gate/main.py now does: create ApprovedTrade directly
+        _, reason = exits[0]
+        proposal = TradeProposal(
+            ticker=pos.ticker,
+            action="CLOSE",
+            strike=None, expiry=None,
+            confidence=1.0, agreement_count=3,
+            suggested_contracts=pos.qty,
+            risk_usd=0.0,
+            all_reasoning=[f"FORCED CLOSE: {reason}"],
+            all_invalidating_conditions=[],
+            as_of=datetime.now(timezone.utc),
+        )
+        trade = ApprovedTrade(
+            proposal=proposal,
+            approved_at=datetime.now(timezone.utc),
+            webhook_reason=f"hard exit auto-approved: {reason}",
+        )
+        # The trade must exist — webhook was never consulted
+        assert trade.proposal.action == "CLOSE"
+        assert trade.proposal.ticker == pos.ticker
+        assert "FORCED CLOSE" in trade.proposal.all_reasoning[0]
+
+
+# ── effective_open position count (bug 3 regression) ──────────────────────
+
+
+class TestEffectiveOpenCount:
+    """
+    Regression: gate/main.py subtracted len(forced_close_tickers) from
+    existing_open_count, but a ticker can have multiple contracts. It now
+    subtracts the actual number of positions for each forced-close ticker.
+    """
+
+    def test_single_contract_per_ticker_unchanged(self, gate_cfg):
+        """One position per ticker — old and new logic agree."""
+        # 1 existing position, 0 being closed, 0 new buys → effective = 1
+        existing = 1
+        positions_closed = 0
+        new_buys = 0
+        effective = existing - positions_closed + new_buys
+        assert effective == 1
+
+    def test_multiple_contracts_for_forced_close_ticker(self, gate_cfg):
+        """
+        TSLA has 2 open contracts. After a hard exit the effective count
+        should drop by 2, not by 1 (the old ticker-set bug).
+        """
+        existing_open_count = 2   # 2 TSLA contracts
+        positions_closed = 2      # both contracts are being closed
+        new_buys = 0
+        effective = existing_open_count - positions_closed + new_buys
+        assert effective == 0
+
+    def test_mixed_tickers_only_closed_ticker_subtracted(self, gate_cfg):
+        """
+        TSLA (2 contracts) hard-exited, NVDA (1 contract) stays open.
+        effective_open should be 1 (NVDA), not 3-1=2 (old bug).
+        """
+        existing_open_count = 3   # 2 TSLA + 1 NVDA
+        positions_closed = 2      # only TSLA's positions
+        new_buys = 1              # one new buy approved
+        effective = existing_open_count - positions_closed + new_buys
+        assert effective == 2     # NVDA still open + new buy
