@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+from audit import storage as audit
 from consensus.config import Config
 from consensus.engine import evaluate_all
 from fetcher.models import MarketSnapshot
@@ -54,6 +55,7 @@ async def main_async() -> None:
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
     log.info("Wrote %d passed results to %s", len(passed), out_path)
+    audit.record_consensus(results)  # audit all results, not just passed
 
     print(json.dumps(payload, indent=2, default=str))
 

@@ -43,6 +43,26 @@ spec:
                   value: "252"
                 - name: OUTPUT_DIR
                   value: "/data/fetcher"
+                - name: AUDIT_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_endpoint
+                - name: AUDIT_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_bucket
+                - name: AUDIT_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_access_key
+                - name: AUDIT_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_secret_key
               volumeMounts:
                 - name: pipeline-data
                   mountPath: /data
@@ -58,6 +78,13 @@ metadata:
   namespace: swing-trader
 data:
   tickers: "SPY,QQQ,AAPL,MSFT,NVDA,TSLA,AMZN,META,GOOGL"
+---
+# kubectl create secret generic audit-secrets \
+#   --from-literal=s3_endpoint=https://fsn1.your-objectstorage.com \
+#   --from-literal=s3_bucket=swing-trader-audit \
+#   --from-literal=s3_access_key=<KEY> \
+#   --from-literal=s3_secret_key=<SECRET> \
+#   -n swing-trader
 ---
 # kubectl create secret generic alpaca-credentials \
 #   --from-literal=api_key=<KEY> \

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+from audit import storage as audit
 from fetcher.client import AlpacaClient
 from fetcher.config import Config
 from fetcher.indicators import compute
@@ -87,6 +88,7 @@ def main() -> None:
     with open(out_path, "w") as f:
         f.write(output_json)
     log.info("Wrote %d snapshots to %s", len(snapshots), out_path)
+    audit.record_snapshots(snapshots)
 
     # Also emit to stdout for k3s log capture / pipeline chaining
     print(output_json)

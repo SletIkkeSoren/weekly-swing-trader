@@ -48,6 +48,26 @@ spec:
                       key: approval_webhook_url
                 - name: WEBHOOK_TIMEOUT_SECS
                   value: "300"
+                - name: AUDIT_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_endpoint
+                - name: AUDIT_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_bucket
+                - name: AUDIT_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_access_key
+                - name: AUDIT_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_secret_key
               volumeMounts:
                 - name: pipeline-data
                   mountPath: /data

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 import httpx
 from dotenv import load_dotenv
 
+from audit import storage as audit
+
 from executor.client import AlpacaOptionsClient
 from executor.config import Config
 from executor.models import ExecutionResult
@@ -238,6 +240,7 @@ def main() -> None:
     with open(out_path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
     log.info("Wrote %d execution result(s) to %s", len(results), out_path)
+    audit.record_executions(results)
 
     print(json.dumps(payload, indent=2, default=str))
 

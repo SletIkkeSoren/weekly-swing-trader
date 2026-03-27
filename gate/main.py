@@ -16,6 +16,8 @@ import httpx
 
 from dotenv import load_dotenv
 
+from audit import storage as audit
+
 from consensus.models import ConsensusResult
 from gate.config import Config
 from gate.filters import check_hard_exits, run_all, suggested_contracts
@@ -146,6 +148,7 @@ async def main_async() -> None:
             approved.append(trade)
 
     log.info("%d/%d trades approved", len(approved), len(results))
+    audit.record_approved(approved)
 
     os.makedirs(cfg.output_dir, exist_ok=True)
     out_path = os.path.join(cfg.output_dir, "approved.json")
