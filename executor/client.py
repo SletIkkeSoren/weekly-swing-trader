@@ -4,6 +4,7 @@ Uses the trading REST API for orders and the data API for quotes.
 """
 
 import logging
+import re
 from datetime import date
 
 import httpx
@@ -85,15 +86,22 @@ class AlpacaOptionsClient:
         return r.json()
 
     def get_open_positions_for_ticker(self, ticker: str) -> list[dict]:
-        """Return all open option positions for a given underlying ticker."""
+        """Return all open option positions for a given underlying ticker.
+
+        Alpaca's /v2/positions response does not reliably include underlying_symbol
+        for options. Parse the ticker from the OCC symbol instead (e.g. TSLA → TSLA260117C00250000).
+        """
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.get(f"{self._trading_base}/v2/positions")
             r.raise_for_status()
-        return [
-            p for p in r.json()
-            if p.get("asset_class") == "us_option"
-            and p.get("underlying_symbol", "").upper() == ticker.upper()
-        ]
+        results = []
+        for p in r.json():
+            if p.get("asset_class") != "us_option":
+                continue
+            m = re.match(r"([A-Z]+)\d", p.get("symbol", ""))
+            if m and m.group(1).upper() == ticker.upper():
+                results.append(p)
+        return results
 
     def close_position(self, occ_symbol: str) -> dict:
         """Sell-to-close an open position via DELETE /v2/positions/{symbol}."""
