@@ -20,7 +20,17 @@ spec:
           containers:
             - name: gate
               image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
-              command: ["python", "-m", "gate.main"]
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  python -m gate.main
+                  EXIT=$?
+                  if [ $EXIT -ne 0 ]; then
+                    curl -s -X POST "$APPROVAL_WEBHOOK_URL" \
+                      -H 'Content-Type: application/json' \
+                      -d '{"content": "❌ **gate** CronJob failed — check k8s logs"}'
+                    exit $EXIT
+                  fi
               env:
                 - name: INPUT_DIR
                   value: "/data/consensus"
