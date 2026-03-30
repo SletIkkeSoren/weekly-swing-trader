@@ -1,8 +1,8 @@
 import json
 import logging
 
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
 
 from consensus.config import Config
 from consensus.models import ModelVote
@@ -11,28 +11,29 @@ from fetcher.models import MarketSnapshot
 
 log = logging.getLogger(__name__)
 
-_model: genai.GenerativeModel | None = None
+_client: genai.Client | None = None
 
 
-def _get_model(cfg: Config) -> genai.GenerativeModel:
-    global _model
-    if _model is None:
-        genai.configure(api_key=cfg.google_api_key)
-        _model = genai.GenerativeModel(
-            model_name=cfg.gemini_model,
-            system_instruction=SYSTEM_PROMPT,
-            generation_config=GenerationConfig(response_mime_type="application/json", max_output_tokens=512),
-        )
-    return _model
+def _get_client(cfg: Config) -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=cfg.google_api_key)
+    return _client
 
 
 async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
     raw = ""
     try:
-        response = await _get_model(cfg).generate_content_async(
-            build_user_message(snapshot)
+        response = await _get_client(cfg).aio.models.generate_content(
+            model=cfg.gemini_model,
+            contents=build_user_message(snapshot),
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                response_mime_type="application/json",
+                max_output_tokens=512,
+            ),
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         if not raw:
             log.warning("[%s] Gemini returned empty response", snapshot.ticker)
             return None
