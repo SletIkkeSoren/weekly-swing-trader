@@ -24,7 +24,7 @@ async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
     try:
         message = await _get_client(cfg).messages.create(
             model=cfg.claude_model,
-            max_tokens=2048,
+            max_tokens=512,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": build_user_message(snapshot)}],
         )

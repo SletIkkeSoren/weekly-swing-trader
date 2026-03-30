@@ -21,7 +21,7 @@ def _get_model(cfg: Config) -> genai.GenerativeModel:
         _model = genai.GenerativeModel(
             model_name=cfg.gemini_model,
             system_instruction=SYSTEM_PROMPT,
-            generation_config=GenerationConfig(response_mime_type="application/json"),
+            generation_config=GenerationConfig(response_mime_type="application/json", max_output_tokens=512),
         )
     return _model
 

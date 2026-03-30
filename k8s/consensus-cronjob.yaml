@@ -32,6 +32,11 @@ spec:
                     secretKeyRef:
                       name: llm-credentials
                       key: google_api_key
+                - name: OPENAI_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: llm-credentials
+                      key: openai_api_key
                 - name: INPUT_DIR
                   value: "/data/fetcher"
                 - name: OUTPUT_DIR

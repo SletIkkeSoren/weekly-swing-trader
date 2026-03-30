@@ -30,9 +30,10 @@ async def _evaluate(snapshot: MarketSnapshot, votes: list[ModelVote | None]) -> 
         cfg = ConsensusConfig(
             anthropic_api_key="test",
             google_api_key="test",
+            openai_api_key="test",
             claude_model="claude-haiku-4-5-20251001",
             gemini_model="gemini-2.5-flash-lite",
-            gemini_model_2="gemini-2.5-flash",
+            openai_model="gpt-4.1-nano-2025-04-14",
             input_dir="/tmp",
             output_dir="/tmp",
         )
