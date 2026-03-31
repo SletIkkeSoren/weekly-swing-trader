@@ -4,8 +4,9 @@ metadata:
   name: consensus
   namespace: swing-trader
 spec:
-  # 15 minutes after fetcher each hour (15:15–20:15 UTC Mon–Fri)
-  schedule: "15 15-22 * * 1-5"
+  # 5 min after fetcher — 13:35–19:35 UTC = 15:35–21:35 CEST (summer).
+  # NOTE: Update hour range to 14-20 in late October (CET/EST winter shift).
+  schedule: "35 13-19 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

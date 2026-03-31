@@ -4,8 +4,9 @@ metadata:
   name: executor
   namespace: swing-trader
 spec:
-  # 45 minutes after fetcher each hour (15:45–20:45 UTC Mon–Fri)
-  schedule: "45 15-22 * * 1-5"
+  # 15 min after fetcher — 13:45–19:45 UTC = 15:45–21:45 CEST (summer, 15 min before close).
+  # NOTE: Update hour range to 14-20 in late October (CET/EST winter shift).
+  schedule: "45 13-19 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

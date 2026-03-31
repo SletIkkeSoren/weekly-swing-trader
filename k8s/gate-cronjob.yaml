@@ -4,8 +4,9 @@ metadata:
   name: gate
   namespace: swing-trader
 spec:
-  # 30 minutes after fetcher each hour (15:30–20:30 UTC Mon–Fri)
-  schedule: "30 15-22 * * 1-5"
+  # 10 min after fetcher — 13:40–19:40 UTC = 15:40–21:40 CEST (summer).
+  # NOTE: Update hour range to 14-20 in late October (CET/EST winter shift).
+  schedule: "40 13-19 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

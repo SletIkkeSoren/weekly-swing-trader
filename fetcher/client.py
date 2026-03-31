@@ -75,6 +75,15 @@ class AlpacaClient:
             )
         return result
 
+    def is_trading_day_today(self) -> bool:
+        """Return True if today is a US stock market trading day (not a holiday)."""
+        from alpaca.trading.requests import GetCalendarRequest
+        today = date.today()
+        calendar = self._trading_client.get_calendar(
+            GetCalendarRequest(start=str(today), end=str(today))
+        )
+        return len(calendar) > 0
+
     def fetch_open_positions(self) -> list[OpenPosition]:
         """Return all open US option positions on the account."""
         raw = self._trading_client.get_all_positions()

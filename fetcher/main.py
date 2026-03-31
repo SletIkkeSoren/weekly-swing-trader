@@ -75,6 +75,14 @@ def main() -> None:
     cfg = Config.from_env()
     log.info("Fetcher starting — tickers=%s lookback=%d", cfg.tickers, cfg.lookback_days)
 
+    client = AlpacaClient(cfg)
+    if not client.is_trading_day_today():
+        log.info("Today is not a US trading day (holiday) — writing empty snapshot and exiting")
+        os.makedirs(cfg.output_dir, exist_ok=True)
+        with open(os.path.join(cfg.output_dir, "snapshots.json"), "w") as f:
+            f.write("[]")
+        return
+
     snapshots = run(cfg)
     if not snapshots:
         log.error("No snapshots produced; exiting with error")
