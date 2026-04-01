@@ -24,6 +24,7 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from botocore.client import Config
 from botocore.exceptions import ClientError
 
 log = logging.getLogger("audit")
@@ -36,6 +37,7 @@ def _client():
         aws_access_key_id=os.environ["AUDIT_S3_ACCESS_KEY"],
         aws_secret_access_key=os.environ["AUDIT_S3_SECRET_KEY"],
         region_name=os.getenv("AUDIT_S3_REGION", "fsn1"),
+        config=Config(s3={"addressing_style": "path"}),
     )
 
 
