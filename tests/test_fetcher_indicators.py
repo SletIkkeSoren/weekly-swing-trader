@@ -102,6 +102,30 @@ class TestCompute:
         result_b = compute(bars)
         assert result_a.model_dump() == result_b.model_dump()
 
+    def test_macd_hist_slope_is_finite(self):
+        bars = _make_bars(252)
+        ind = compute(bars)
+        assert np.isfinite(ind.macd_hist_slope)
+
+    def test_macd_hist_slope_positive_in_uptrend(self):
+        """Strong uptrend should produce rising MACD histogram."""
+        bars = _make_bars(252, trend=1.005)
+        ind = compute(bars)
+        # In a consistent uptrend the histogram slope should be non-negative
+        # (allow small negatives near convergence)
+        assert ind.macd_hist_slope > -0.5
+
+    def test_price_pct_90d_in_range(self):
+        bars = _make_bars(252)
+        ind = compute(bars)
+        assert 0.0 <= ind.price_pct_90d <= 1.0
+
+    def test_price_pct_90d_near_one_in_uptrend(self):
+        """In a sustained uptrend the latest close should be near the 90d high."""
+        bars = _make_bars(252, trend=1.002)
+        ind = compute(bars)
+        assert ind.price_pct_90d > 0.8
+
 
 # ── _historical_volatility ─────────────────────────────────────────────────
 

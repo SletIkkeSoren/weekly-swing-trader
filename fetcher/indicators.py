@@ -49,6 +49,20 @@ def compute(bars: list[OHLCVBar]) -> TechnicalIndicators:
     vol_ma20 = volume.rolling(20).mean()
     volume_ratio = float(volume.iloc[-1] / vol_ma20.iloc[-1])
 
+    # ── Derived signals ────────────────────────────────────────────────────
+    # 3-bar change in MACD histogram (positive = rising momentum)
+    macd_hist_slope = float(macd_hist.iloc[-1] - macd_hist.iloc[-4])
+
+    # Price percentile within 90-day high-low range [0–1]
+    recent_90 = df.tail(90)
+    high_90 = float(recent_90["high"].max())
+    low_90 = float(recent_90["low"].min())
+    price_pct_90d = (
+        float((close.iloc[-1] - low_90) / (high_90 - low_90))
+        if high_90 != low_90
+        else 0.5
+    )
+
     # ── Support / Resistance (pivot-based, nearest within ±5% of close) ───
     support, resistance = _nearest_levels(df)
 
@@ -67,6 +81,8 @@ def compute(bars: list[OHLCVBar]) -> TechnicalIndicators:
         atr_14=_last(atr),
         hv_20=hv_20,
         volume_ratio=volume_ratio,
+        macd_hist_slope=macd_hist_slope,
+        price_pct_90d=price_pct_90d,
         nearest_support=support,
         nearest_resistance=resistance,
     )

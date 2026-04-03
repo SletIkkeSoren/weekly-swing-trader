@@ -23,11 +23,19 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
     """Run all model calls in parallel and return an aggregated ConsensusResult."""
     raw_votes: list[ModelVote | None] = await asyncio.gather(
         *[caller(snapshot, cfg) for caller in _CALLERS],
-        return_exceptions=False,
+        return_exceptions=True,
     )
 
-    votes = [v for v in raw_votes if v is not None]
-    rejected = len(raw_votes) - len(votes)
+    votes = []
+    rejected = 0
+    for result in raw_votes:
+        if isinstance(result, BaseException):
+            log.warning("[%s] Model call raised exception: %s", snapshot.ticker, result)
+            rejected += 1
+        elif result is None:
+            rejected += 1
+        else:
+            votes.append(result)
     if rejected:
         log.warning("[%s] %d model call(s) rejected (invalid schema or error)", snapshot.ticker, rejected)
 

@@ -10,7 +10,7 @@ Rules enforced here:
 import json
 from datetime import date, timedelta
 
-from fetcher.models import MarketSnapshot
+from fetcher.models import MarketSnapshot, TechnicalIndicators
 
 SYSTEM_PROMPT = """You are a quantitative options analyst. You will be given market data
 for a single equity: recent OHLCV bars, pre-computed technical indicators, and any
@@ -44,21 +44,85 @@ def next_friday(from_date: date | None = None) -> date:
     return d + timedelta(days=days_ahead)
 
 
+def third_friday(year: int, month: int) -> date:
+    """Return the 3rd Friday of the given month (standard monthly options expiry)."""
+    d = date(year, month, 1)
+    days_until_friday = (4 - d.weekday()) % 7
+    first_friday = d + timedelta(days=days_until_friday)
+    return first_friday + timedelta(weeks=2)
+
+
+def _rsi_label(rsi: float) -> str:
+    if rsi < 30:
+        return "OVERSOLD"
+    elif rsi > 70:
+        return "OVERBOUGHT"
+    elif rsi < 45:
+        return "WEAK"
+    elif rsi > 55:
+        return "STRONG"
+    return "NEUTRAL"
+
+
+def _ema_alignment_label(close: float, ind: TechnicalIndicators) -> str:
+    emas = [ind.ema_8, ind.ema_21, ind.ema_50, ind.ema_200]
+    if all(emas[i] > emas[i + 1] for i in range(3)):
+        stack = "fully stacked bullish (8>21>50>200)"
+    elif all(emas[i] < emas[i + 1] for i in range(3)):
+        stack = "fully stacked bearish (8<21<50<200)"
+    else:
+        order = []
+        pairs = [("8", "21"), ("21", "50"), ("50", "200")]
+        for (a_name, b_name), (a_val, b_val) in zip(pairs, zip(emas, emas[1:])):
+            order.append(f"{a_name}>{ b_name}" if a_val > b_val else f"{a_name}<{b_name}")
+        stack = f"mixed ({', '.join(order)})"
+
+    pct = (close - ind.ema_200) / ind.ema_200 * 100
+    direction = "above" if pct >= 0 else "below"
+    return f"{stack} | price {direction} EMA-200 by {abs(pct):.1f}%"
+
+
+def _bb_position_label(close: float, ind: TechnicalIndicators) -> tuple[float, str]:
+    """Returns (bb_pct 0-100, descriptive label)."""
+    band_width = ind.bb_upper - ind.bb_lower
+    bb_pct = (close - ind.bb_lower) / band_width * 100 if band_width else 50.0
+    if bb_pct >= 80:
+        label = "near upper band — extended"
+    elif bb_pct <= 20:
+        label = "near lower band — compressed"
+    else:
+        label = "mid-range"
+    return bb_pct, label
+
+
+def _macd_slope_label(slope: float) -> str:
+    return "RISING" if slope > 0 else "FALLING" if slope < 0 else "FLAT"
+
+
 def build_user_message(snapshot: MarketSnapshot) -> str:
     ind = snapshot.indicators
-    recent_bars = snapshot.bars[-20:]  # last 20 trading days; indicators cover the rest
+    close = snapshot.latest_close
+    has_positions = bool(snapshot.open_positions)
 
-    bars_table = "\n".join(
-        f"  {b.date}  O:{b.open:.2f}  H:{b.high:.2f}  L:{b.low:.2f}"
-        f"  C:{b.close:.2f}  V:{b.volume:.0f}"
-        for b in recent_bars
-    )
-
-    nearest_friday = next_friday()
+    # ── Available expiries ────────────────────────────────────────────────
+    today = date.today()
+    nearest_friday = next_friday(today)
     following_friday = next_friday(nearest_friday + timedelta(days=1))
+    monthly = third_friday(today.year, today.month)
+    if monthly <= today:
+        nm = (today.replace(day=1) + timedelta(days=32))
+        monthly = third_friday(nm.year, nm.month)
 
+    # ── Pre-interpreted signal labels ─────────────────────────────────────
+    rsi_label = _rsi_label(ind.rsi_14)
+    ema_label = _ema_alignment_label(close, ind)
+    bb_pct, bb_label = _bb_position_label(close, ind)
+    macd_slope_label = _macd_slope_label(ind.macd_hist_slope)
+    price_pct_label = f"{ind.price_pct_90d * 100:.0f}th percentile of 90-day range"
+
+    # ── Open positions section ────────────────────────────────────────────
     positions_section = ""
-    if snapshot.open_positions:
+    if has_positions:
         lines = []
         for pos in snapshot.open_positions:
             pnl_sign = "+" if pos.pnl_pct >= 0 else ""
@@ -75,38 +139,53 @@ def build_user_message(snapshot: MarketSnapshot) -> str:
             "You must output CLOSE or HOLD only — do not output BUY_CALL or BUY_PUT.\n"
         )
 
+    # ── Recent price action — omitted for CLOSE decisions ────────────────
+    price_action_section = ""
+    if not has_positions:
+        recent_bars = snapshot.bars[-20:]
+        bars_table = "\n".join(
+            f"  {b.date}  O:{b.open:.2f}  H:{b.high:.2f}  L:{b.low:.2f}"
+            f"  C:{b.close:.2f}  V:{b.volume:.0f}"
+            + (f"  VWAP:{b.vwap:.2f}" if b.vwap is not None else "")
+            for b in recent_bars
+        )
+        price_action_section = f"\n--- RECENT PRICE ACTION (last 20 sessions) ---\n{bars_table}\n"
+
     return f"""
 TICKER: {snapshot.ticker}
 AS OF:  {snapshot.as_of.date()}
-CLOSE:  {snapshot.latest_close:.2f}
-{positions_section}
---- RECENT PRICE ACTION (last 20 sessions) ---
-{bars_table}
-
+CLOSE:  {close:.2f}
+{positions_section}{price_action_section}
 --- TECHNICAL INDICATORS ---
 Trend
+  EMA alignment: {ema_label}
   EMA-8:   {ind.ema_8:.2f}   EMA-21:  {ind.ema_21:.2f}
   EMA-50:  {ind.ema_50:.2f}  EMA-200: {ind.ema_200:.2f}
 
 Momentum
-  RSI-14:  {ind.rsi_14:.1f}
-  MACD:    {ind.macd:.4f}  Signal: {ind.macd_signal:.4f}  Hist: {ind.macd_hist:.4f}
+  RSI-14:  {ind.rsi_14:.1f}  [{rsi_label}]
+  MACD:    {ind.macd:.4f}  Signal: {ind.macd_signal:.4f}  Hist: {ind.macd_hist:.4f}  Slope: {ind.macd_hist_slope:+.4f} [{macd_slope_label}]
 
 Volatility
   BB-Upper: {ind.bb_upper:.2f}  BB-Mid: {ind.bb_mid:.2f}  BB-Lower: {ind.bb_lower:.2f}
+  BB position: {bb_pct:.0f}% ({bb_label})
   ATR-14:   {ind.atr_14:.2f}
   HV-20:    {ind.hv_20 * 100:.1f}%  (annualised)
 
 Volume
   Volume ratio (vs 20d avg): {ind.volume_ratio:.2f}x
 
+Price Context
+  90-day range position: {price_pct_label}
+
 Key Levels
   Nearest support:    {f"{ind.nearest_support:.2f}" if ind.nearest_support else "none within 5%"}
   Nearest resistance: {f"{ind.nearest_resistance:.2f}" if ind.nearest_resistance else "none within 5%"}
 
 --- AVAILABLE EXPIRIES ---
-Nearest Friday:  {nearest_friday}
+Nearest Friday:   {nearest_friday}
 Following Friday: {following_friday}
+Monthly (3rd Fri): {monthly}
 
 Respond with valid JSON only.
 """.strip()

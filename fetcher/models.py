@@ -45,6 +45,14 @@ class TechnicalIndicators(BaseModel):
         description="Latest volume / 20-day average volume"
     )
 
+    # Derived signals
+    macd_hist_slope: float = Field(
+        description="3-bar change in MACD histogram (positive = rising momentum)"
+    )
+    price_pct_90d: float = Field(
+        description="Price percentile within 90-day high-low range [0–1]; 1.0 = at 90d high"
+    )
+
     # Key levels (nearest S/R within ±5% of close)
     nearest_support: Optional[float] = None
     nearest_resistance: Optional[float] = None

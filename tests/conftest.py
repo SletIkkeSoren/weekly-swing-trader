@@ -48,6 +48,8 @@ def make_indicators(close: float = 150.0) -> TechnicalIndicators:
         atr_14=2.5,
         hv_20=0.25,
         volume_ratio=1.2,
+        macd_hist_slope=0.01,
+        price_pct_90d=0.65,
         nearest_support=close * 0.98,
         nearest_resistance=close * 1.02,
     )
