@@ -28,12 +28,12 @@ async def _evaluate(snapshot: MarketSnapshot, votes: list[ModelVote | None]) -> 
     with patch("consensus.engine._CALLERS", _callers(*votes)):
         from consensus.config import Config as ConsensusConfig
         cfg = ConsensusConfig(
-            anthropic_api_key="test",
+            mistral_api_key="test",
             google_api_key="test",
             openai_api_key="test",
-            claude_model="claude-haiku-4-5-20251001",
-            gemini_model="gemini-2.5-flash-lite",
-            openai_model="gpt-4.1-nano-2025-04-14",
+            mistral_model="mistral-small-2603",
+            gemini_model="gemini-2.5-flash",
+            openai_model="gpt-5-mini",
             input_dir="/tmp",
             output_dir="/tmp",
         )

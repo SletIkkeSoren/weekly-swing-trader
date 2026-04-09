@@ -33,11 +33,11 @@ spec:
                     exit $EXIT
                   fi
               env:
-                - name: ANTHROPIC_API_KEY
+                - name: MISTRAL_API_KEY
                   valueFrom:
                     secretKeyRef:
                       name: llm-credentials
-                      key: anthropic_api_key
+                      key: mistral_api_key
                 - name: GOOGLE_API_KEY
                   valueFrom:
                     secretKeyRef:
@@ -86,7 +86,7 @@ spec:
                 claimName: pipeline-data-pvc
 ---
 # kubectl create secret generic llm-credentials \
-#   --from-literal=anthropic_api_key=<KEY> \
+#   --from-literal=mistral_api_key=<KEY> \
 #   --from-literal=openai_api_key=<KEY> \
 #   --from-literal=google_api_key=<KEY> \
 #   -n swing-trader

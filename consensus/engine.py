@@ -8,14 +8,14 @@ import logging
 from collections import Counter
 from datetime import datetime, timezone
 
-from consensus.callers import claude, gemini, openai_caller
+from consensus.callers import gemini, mistral, openai_caller
 from consensus.config import Config
 from consensus.models import Action, ConsensusResult, ModelVote
 from fetcher.models import MarketSnapshot
 
 log = logging.getLogger(__name__)
 
-_CALLERS = [claude.call, gemini.call, openai_caller.call]
+_CALLERS = [mistral.call, gemini.call, openai_caller.call]
 _REQUIRED_AGREEMENT = 2
 
 
