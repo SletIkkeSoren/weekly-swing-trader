@@ -17,12 +17,28 @@ log = logging.getLogger(__name__)
 
 _CALLERS = [mistral.call, gemini.call, openai_caller.call]
 _REQUIRED_AGREEMENT = 2
+_CALLER_TIMEOUT_SECS = 60.0
+
+
+async def _call_with_timeout(
+    caller, snapshot: MarketSnapshot, cfg: Config
+) -> ModelVote | None:
+    try:
+        return await asyncio.wait_for(caller(snapshot, cfg), timeout=_CALLER_TIMEOUT_SECS)
+    except asyncio.TimeoutError:
+        log.warning(
+            "[%s] %s timed out after %.0fs — treating as no vote",
+            snapshot.ticker,
+            caller.__module__,
+            _CALLER_TIMEOUT_SECS,
+        )
+        return None
 
 
 async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
     """Run all model calls in parallel and return an aggregated ConsensusResult."""
     raw_votes: list[ModelVote | None] = await asyncio.gather(
-        *[caller(snapshot, cfg) for caller in _CALLERS],
+        *[_call_with_timeout(caller, snapshot, cfg) for caller in _CALLERS],
         return_exceptions=True,
     )
 
