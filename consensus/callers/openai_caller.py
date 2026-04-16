@@ -29,7 +29,6 @@ async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": build_user_message(snapshot)},
             ],
-            response_format={"type": "json_object"},
         )
         raw = (response.choices[0].message.content or "").strip()
         if not raw:

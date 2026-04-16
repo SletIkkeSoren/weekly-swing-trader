@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -23,24 +24,29 @@ def _get_client(cfg: Config) -> genai.Client:
 
 async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
     raw = ""
-    try:
-        response = await _get_client(cfg).aio.models.generate_content(
-            model=cfg.gemini_model,
-            contents=build_user_message(snapshot),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                max_output_tokens=4096,
-            ),
-        )
-        raw = (response.text or "").strip()
-        if not raw:
-            log.warning("[%s] Gemini returned empty response", snapshot.ticker)
+    for attempt in range(2):
+        try:
+            response = await _get_client(cfg).aio.models.generate_content(
+                model=cfg.gemini_model,
+                contents=build_user_message(snapshot),
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    max_output_tokens=4096,
+                ),
+            )
+            raw = (response.text or "").strip()
+            if not raw:
+                log.warning("[%s] Gemini returned empty response", snapshot.ticker)
+                return None
+            return ModelVote(model=cfg.gemini_model, **json.loads(raw))
+        except json.JSONDecodeError:
+            log.warning("[%s] Gemini returned invalid JSON: %r", snapshot.ticker, raw)
             return None
-        return ModelVote(model=cfg.gemini_model, **json.loads(raw))
-    except json.JSONDecodeError:
-        log.warning("[%s] Gemini returned invalid JSON: %r", snapshot.ticker, raw)
-        return None
-    except Exception:
-        log.exception("[%s] Gemini call failed", snapshot.ticker)
-        return None
+        except Exception as exc:
+            if attempt == 0:
+                log.warning("[%s] Gemini call failed (attempt 1), retrying: %s", snapshot.ticker, exc)
+                await asyncio.sleep(3)
+            else:
+                log.exception("[%s] Gemini call failed", snapshot.ticker)
+                return None
