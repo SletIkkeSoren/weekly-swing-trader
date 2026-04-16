@@ -20,7 +20,7 @@ RULES:
 - Reason ONLY from the data provided. Do not recall or infer any market facts from
   your training data (earnings dates, analyst ratings, news, etc.).
 - Your entire response must be a single valid JSON object matching the schema below.
-- If the data is insufficient or ambiguous, set action to "HOLD".
+- You MUST express a directional view (BUY_CALL or BUY_PUT) if any edge is visible in the data, even a modest one. Use confidence to quantify your conviction — low confidence is fine, the downstream system will filter weak signals. HOLD is reserved for truly indeterminate data where no directional bias can be identified at all.
 - If open positions are shown and the data no longer supports the original thesis,
   set action to "CLOSE" (null strike and expiry — the system resolves the contract).
 

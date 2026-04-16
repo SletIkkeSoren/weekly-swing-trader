@@ -30,7 +30,7 @@ async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 response_mime_type="application/json",
-                max_output_tokens=512,
+                max_output_tokens=4096,
             ),
         )
         raw = (response.text or "").strip()

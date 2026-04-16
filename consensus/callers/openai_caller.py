@@ -24,7 +24,7 @@ async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
     try:
         response = await _get_client(cfg).chat.completions.create(
             model=cfg.openai_model,
-            max_tokens=512,
+            max_completion_tokens=512,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": build_user_message(snapshot)},
