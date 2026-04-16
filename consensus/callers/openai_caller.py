@@ -32,7 +32,12 @@ async def call(snapshot: MarketSnapshot, cfg: Config) -> ModelVote | None:
         )
         raw = (response.choices[0].message.content or "").strip()
         if not raw:
-            log.warning("[%s] OpenAI returned empty response", snapshot.ticker)
+            log.warning(
+                "[%s] OpenAI returned empty response — finish_reason=%s choice=%s",
+                snapshot.ticker,
+                response.choices[0].finish_reason,
+                response.choices[0],
+            )
             return None
         return ModelVote(model=cfg.openai_model, **json.loads(raw))
     except json.JSONDecodeError:
