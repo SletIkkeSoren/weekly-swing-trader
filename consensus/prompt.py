@@ -21,8 +21,15 @@ RULES:
   your training data (earnings dates, analyst ratings, news, etc.).
 - Your entire response must be a single valid JSON object matching the schema below.
 - You MUST express a directional view (BUY_CALL or BUY_PUT) if any edge is visible in the data, even a modest one. Use confidence to quantify your conviction — low confidence is fine, the downstream system will filter weak signals. HOLD is reserved for truly indeterminate data where no directional bias can be identified at all.
-- If open positions are shown and the data no longer supports the original thesis,
-  set action to "CLOSE" (null strike and expiry — the system resolves the contract).
+- If open positions are shown, you must evaluate whether the underlying technical
+  thesis is still intact. Small P&L swings (−5% to −20%) are normal option noise
+  and are NOT a reason to close. This strategy targets 50–150% gains; premature
+  exits destroy the edge. Only set action to "CLOSE" when there is a clear,
+  confirmed technical reversal: trend direction has flipped (e.g. EMA crossover
+  against the position, RSI reversing from extreme), a key support/resistance
+  level has definitively broken, or momentum indicators confirm the move is over.
+  When in doubt, output HOLD. The hard risk exits (stop-loss, take-profit,
+  near-expiry) are handled by a separate system — you do not need to manage them.
 
 OUTPUT SCHEMA (respond with nothing but this JSON):
 {
@@ -139,9 +146,9 @@ def build_user_message(snapshot: MarketSnapshot) -> str:
             "You must output CLOSE or HOLD only — do not output BUY_CALL or BUY_PUT.\n"
         )
 
-    # ── Recent price action — omitted for CLOSE decisions ────────────────
+    # ── Recent price action — always included so model can assess thesis ─
     price_action_section = ""
-    if not has_positions:
+    if True:
         recent_bars = snapshot.bars[-20:]
         bars_table = "\n".join(
             f"  {b.date}  O:{b.open:.2f}  H:{b.high:.2f}  L:{b.low:.2f}"
