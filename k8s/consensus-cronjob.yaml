@@ -22,6 +22,7 @@ spec:
           containers:
             - name: consensus
               image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
+              imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
                 - |
