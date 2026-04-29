@@ -159,7 +159,44 @@ async def main_async() -> None:
         if not filter_result.passed:
             log.info("[%s] REJECTED by filter: %s", result.ticker, filter_result.reason)
             if result.open_positions:
-                await _notify_hold(result, cfg)
+                hold_confidence = result.consensus_confidence or 0.0
+                if (
+                    result.consensus_action == "HOLD"
+                    and hold_confidence < cfg.min_hold_confidence
+                ):
+                    # Weak HOLD — models couldn't commit; autonomous-safe move is to exit.
+                    log.warning(
+                        "[%s] HOLD confidence %.0f%% < threshold %.0f%% — auto-closing",
+                        result.ticker,
+                        hold_confidence * 100,
+                        cfg.min_hold_confidence * 100,
+                    )
+                    for pos in result.open_positions:
+                        proposal = TradeProposal(
+                            ticker=pos.ticker,
+                            action="CLOSE",
+                            strike=None,
+                            expiry=None,
+                            confidence=hold_confidence,
+                            agreement_count=result.agreement_count,
+                            suggested_contracts=pos.qty,
+                            risk_usd=0.0,
+                            all_reasoning=[
+                                f"Weak HOLD ({hold_confidence:.0%} confidence) — auto-close"
+                            ],
+                            all_invalidating_conditions=result.all_invalidating_conditions,
+                            as_of=datetime.now(timezone.utc),
+                        )
+                        trade = ApprovedTrade(
+                            proposal=proposal,
+                            approved_at=datetime.now(timezone.utc),
+                            webhook_reason=f"weak HOLD auto-close: confidence {hold_confidence:.0%} < {cfg.min_hold_confidence:.0%}",
+                        )
+                        await _notify_consensus_close(proposal, cfg)
+                        approved.append(trade)
+                        forced_close_tickers.add(pos.ticker)
+                else:
+                    await _notify_hold(result, cfg)
             continue
 
         contracts = suggested_contracts(cfg)

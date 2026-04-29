@@ -17,6 +17,9 @@ class Config:
     risk_pct: float         # fraction of account to risk per trade (e.g. 0.01 = 1%)
     max_contracts: int      # hard cap regardless of sizing formula
 
+    # Hold confidence threshold — HOLD below this triggers an auto-CLOSE
+    min_hold_confidence: float
+
     # Human approval webhook
     # POST JSON payload, expect {"approved": true/false, "reason": "..."}
     # Set to empty string to run in dry-run mode (logs only, no webhook call)
@@ -34,6 +37,7 @@ class Config:
             account_size=float(os.environ["ACCOUNT_SIZE"]),
             risk_pct=float(os.getenv("RISK_PCT", "0.01")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "5")),
+            min_hold_confidence=float(os.getenv("MIN_HOLD_CONFIDENCE", "0.60")),
             webhook_url=os.getenv("APPROVAL_WEBHOOK_URL", ""),
             webhook_timeout_secs=int(os.getenv("WEBHOOK_TIMEOUT_SECS", "300")),
         )
