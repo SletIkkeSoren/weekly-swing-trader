@@ -21,6 +21,7 @@ spec:
           containers:
             - name: gate
               image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
+              imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args:
                 - |

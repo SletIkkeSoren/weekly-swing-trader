@@ -63,6 +63,30 @@ async def _notify_consensus_close(proposal: TradeProposal, cfg: Config) -> None:
     await _discord_notify(_discord_embed(proposal), cfg, proposal.ticker, "consensus close")
 
 
+async def _notify_hold(result: ConsensusResult, cfg: Config) -> None:
+    action_label = result.consensus_action or "NO CONSENSUS"
+    confidence_str = f"{result.consensus_confidence:.0%}" if result.consensus_confidence else "n/a"
+    pos_lines = "\n".join(
+        f"{pos.occ_symbol}: {pos.qty} contract(s) @ ${pos.avg_entry_price:.2f} "
+        f"({'+'  if pos.pnl_pct >= 0 else ''}{pos.pnl_pct:.0%}, {pos.days_to_expiry}d to expiry)"
+        for pos in result.open_positions
+    )
+    payload = {
+        "embeds": [{
+            "title": f"⏸ {result.ticker} — position reviewed, {action_label}",
+            "color": 0x3498DB,
+            "fields": [
+                {"name": "Agreement",   "value": f"{result.agreement_count}/3 models", "inline": True},
+                {"name": "Confidence",  "value": confidence_str,                        "inline": True},
+                {"name": "Positions",   "value": pos_lines or "—"},
+            ],
+            "footer": {"text": "no action taken"},
+            "timestamp": result.as_of.isoformat(),
+        }]
+    }
+    await _discord_notify(payload, cfg, result.ticker, "hold notification")
+
+
 async def main_async() -> None:
     cfg = Config.from_env()
 
@@ -134,6 +158,8 @@ async def main_async() -> None:
 
         if not filter_result.passed:
             log.info("[%s] REJECTED by filter: %s", result.ticker, filter_result.reason)
+            if result.open_positions:
+                await _notify_hold(result, cfg)
             continue
 
         contracts = suggested_contracts(cfg)
