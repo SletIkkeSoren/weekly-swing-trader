@@ -160,16 +160,22 @@ async def main_async() -> None:
             log.info("[%s] REJECTED by filter: %s", result.ticker, filter_result.reason)
             if result.open_positions:
                 hold_confidence = result.consensus_confidence or 0.0
-                if (
+                is_weak_hold = (
                     result.consensus_action == "HOLD"
                     and hold_confidence < cfg.min_hold_confidence
-                ):
-                    # Weak HOLD — models couldn't commit; autonomous-safe move is to exit.
+                )
+                is_no_consensus = result.consensus_action is None
+                if is_weak_hold or is_no_consensus:
+                    # Weak HOLD or no agreement — models couldn't commit; exit.
+                    reason_label = (
+                        f"Weak HOLD ({hold_confidence:.0%} confidence)"
+                        if is_weak_hold
+                        else f"No consensus ({result.agreement_count}/3 models)"
+                    )
                     log.warning(
-                        "[%s] HOLD confidence %.0f%% < threshold %.0f%% — auto-closing",
+                        "[%s] %s — auto-closing",
                         result.ticker,
-                        hold_confidence * 100,
-                        cfg.min_hold_confidence * 100,
+                        reason_label,
                     )
                     for pos in result.open_positions:
                         proposal = TradeProposal(
@@ -181,16 +187,14 @@ async def main_async() -> None:
                             agreement_count=result.agreement_count,
                             suggested_contracts=pos.qty,
                             risk_usd=0.0,
-                            all_reasoning=[
-                                f"Weak HOLD ({hold_confidence:.0%} confidence) — auto-close"
-                            ],
+                            all_reasoning=[f"{reason_label} — auto-close"],
                             all_invalidating_conditions=result.all_invalidating_conditions,
                             as_of=datetime.now(timezone.utc),
                         )
                         trade = ApprovedTrade(
                             proposal=proposal,
                             approved_at=datetime.now(timezone.utc),
-                            webhook_reason=f"weak HOLD auto-close: confidence {hold_confidence:.0%} < {cfg.min_hold_confidence:.0%}",
+                            webhook_reason=f"{reason_label} auto-close",
                         )
                         await _notify_consensus_close(proposal, cfg)
                         approved.append(trade)

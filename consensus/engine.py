@@ -42,6 +42,7 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
         return_exceptions=True,
     )
 
+    has_open_positions = bool(snapshot.open_positions)
     votes = []
     rejected = 0
     for result in raw_votes:
@@ -49,6 +50,14 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
             log.warning("[%s] Model call raised exception: %s", snapshot.ticker, result)
             rejected += 1
         elif result is None:
+            rejected += 1
+        elif has_open_positions and result.action in ("BUY_CALL", "BUY_PUT"):
+            log.warning(
+                "[%s] %s returned %s despite open position — vote discarded",
+                snapshot.ticker,
+                result.model,
+                result.action,
+            )
             rejected += 1
         else:
             votes.append(result)
@@ -73,7 +82,13 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
     top_action, top_count = action_counts.most_common(1)[0]
 
     if top_count < _REQUIRED_AGREEMENT:
-        log.info("[%s] No consensus (votes: %s)", snapshot.ticker, dict(action_counts))
+        result.consensus_confidence = sum(v.confidence for v in votes) / len(votes)
+        log.info(
+            "[%s] No consensus (votes: %s  avg_confidence=%.2f)",
+            snapshot.ticker,
+            dict(action_counts),
+            result.consensus_confidence,
+        )
         return result
 
     agreeing = [v for v in votes if v.action == top_action]
