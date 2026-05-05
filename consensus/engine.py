@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 _CALLERS = [mistral.call, gemini.call, openai_caller.call]
 _REQUIRED_AGREEMENT = 2
+_REQUIRED_CLOSE_AGREEMENT = 3  # unanimous — daily bars barely change hour-to-hour, so 2/3 CLOSE is noise
 _CALLER_TIMEOUT_SECS = 60.0
 
 
@@ -88,6 +89,15 @@ async def evaluate(snapshot: MarketSnapshot, cfg: Config) -> ConsensusResult:
             snapshot.ticker,
             dict(action_counts),
             result.consensus_confidence,
+        )
+        return result
+
+    if top_action == "CLOSE" and top_count < _REQUIRED_CLOSE_AGREEMENT:
+        result.consensus_confidence = sum(v.confidence for v in votes) / len(votes)
+        log.info(
+            "[%s] CLOSE not unanimous (%d/3) — treating as HOLD to prevent churn",
+            snapshot.ticker,
+            top_count,
         )
         return result
 

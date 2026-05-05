@@ -20,6 +20,7 @@ from audit import storage as audit
 
 from consensus.models import ConsensusResult
 from gate.config import Config
+from gate.cooldown import is_on_cooldown, mark_closed
 from gate.filters import check_hard_exits, run_all, suggested_contracts
 from gate.models import ApprovedTrade, TradeProposal
 from gate.webhook import _discord_embed, request_approval
@@ -137,6 +138,7 @@ async def main_async() -> None:
             await _notify_hard_exit(proposal, cfg)
             approved.append(trade)
             forced_close_tickers.add(pos.ticker)
+            mark_closed(pos.ticker, cfg.output_dir)
 
     # ── Phase 2: consensus-based filter chain ──────────────────────────────
     for result in results:
@@ -199,6 +201,7 @@ async def main_async() -> None:
                         await _notify_consensus_close(proposal, cfg)
                         approved.append(trade)
                         forced_close_tickers.add(pos.ticker)
+                        mark_closed(pos.ticker, cfg.output_dir)
                 else:
                     await _notify_hold(result, cfg)
             continue
@@ -220,7 +223,7 @@ async def main_async() -> None:
 
         if proposal.action == "CLOSE":
             # Close decisions are self-determined — no human approval needed.
-            # The system already required 2/3 model consensus to get here.
+            # The system already required 3/3 model consensus to get here.
             trade = ApprovedTrade(
                 proposal=proposal,
                 approved_at=datetime.now(timezone.utc),
@@ -228,7 +231,15 @@ async def main_async() -> None:
             )
             await _notify_consensus_close(proposal, cfg)
             approved.append(trade)
+            mark_closed(proposal.ticker, cfg.output_dir)
         else:
+            if is_on_cooldown(proposal.ticker, cfg.output_dir):
+                log.info(
+                    "[%s] Skipping new %s — ticker on cooldown (position closed earlier today)",
+                    proposal.ticker,
+                    proposal.action,
+                )
+                continue
             trade = await request_approval(proposal, cfg)
             if trade:
                 approved.append(trade)

@@ -37,7 +37,7 @@ class Config:
             account_size=float(os.environ["ACCOUNT_SIZE"]),
             risk_pct=float(os.getenv("RISK_PCT", "0.01")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "5")),
-            min_hold_confidence=float(os.getenv("MIN_HOLD_CONFIDENCE", "0.60")),
+            min_hold_confidence=float(os.getenv("MIN_HOLD_CONFIDENCE", "0.75")),
             webhook_url=os.getenv("APPROVAL_WEBHOOK_URL", ""),
             webhook_timeout_secs=int(os.getenv("WEBHOOK_TIMEOUT_SECS", "300")),
         )
