@@ -4,9 +4,8 @@ metadata:
   name: fetcher
   namespace: swing-trader
 spec:
-  # Hourly during market hours — 13:30–19:30 UTC = 15:30–21:30 CEST (summer).
-  # NOTE: Update hour range to 14-20 in late October (CET/EST winter shift).
-  schedule: "30 13-19 * * 1-5"
+  # Once daily after market close — 21:00 UTC = 23:00 CEST (summer) / 22:00 CET (winter).
+  schedule: "0 21 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

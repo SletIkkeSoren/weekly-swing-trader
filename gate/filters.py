@@ -14,9 +14,9 @@ from gate.config import Config
 from gate.models import FilterResult
 
 # Hard exit thresholds
-_STOP_LOSS_PCT = -0.50    # force CLOSE if down 50% or more
+_STOP_LOSS_PCT = -0.25    # force CLOSE if down 25% or more
 _TAKE_PROFIT_PCT = 1.50   # force CLOSE if up 150% or more
-_MIN_DTE = 2              # force CLOSE if 2 or fewer days to expiry
+_MIN_DTE = 7              # force CLOSE if 7 or fewer days to expiry
 
 
 def check_hard_exits(
