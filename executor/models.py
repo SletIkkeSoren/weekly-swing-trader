@@ -14,6 +14,7 @@ class ExecutionResult(BaseModel):
     order_id: str | None = None
     order_type: str
     limit_price: float | None = None
+    filled_avg_price: float | None = None  # None if not filled within the poll window
     status: Literal["submitted", "dry_run", "error"]
     reason: str = ""
     executed_at: datetime

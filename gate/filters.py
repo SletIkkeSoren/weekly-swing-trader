@@ -8,6 +8,7 @@ bypassing the normal consensus flow entirely.
 
 import math
 
+from audit.performance import TickerStats
 from consensus.models import ConsensusResult
 from fetcher.models import OpenPosition
 from gate.config import Config
@@ -17,6 +18,11 @@ from gate.models import FilterResult
 _STOP_LOSS_PCT = -0.25    # force CLOSE if down 25% or more
 _TAKE_PROFIT_PCT = 1.50   # force CLOSE if up 150% or more
 _MIN_DTE = 7              # force CLOSE if 7 or fewer days to expiry
+
+# Loss cooldown thresholds — blocks new entries on a ticker with a recent bad streak
+_LOSS_COOLDOWN_WINDOW = 3     # look at the last N closed trades for this ticker
+_LOSS_COOLDOWN_THRESHOLD = 2  # cooldown if at least this many of them were losses
+_LOSS_COOLDOWN_DAYS = 14      # cooldown lasts this long after the most recent of those losses
 
 
 def check_hard_exits(
@@ -37,14 +43,24 @@ def check_hard_exits(
     return forced
 
 
-def run_all(result: ConsensusResult, cfg: Config, open_trade_count: int) -> FilterResult:
-    # CLOSE actions skip strike sanity and open-trade cap (they reduce exposure)
+def run_all(
+    result: ConsensusResult,
+    cfg: Config,
+    open_trade_count: int,
+    ticker_stats: dict[str, TickerStats] | None = None,
+) -> FilterResult:
+    # CLOSE actions skip strike sanity, open-trade cap, and loss cooldown
+    # (they reduce exposure, and a cooldown should never block an exit)
     if result.consensus_action == "CLOSE":
         for check in (_confidence, _agreement):
             fr = check(result, cfg, open_trade_count)
             if not fr.passed:
                 return fr
         return FilterResult(passed=True, reason="ok")
+
+    fr = _loss_cooldown(result, ticker_stats)
+    if not fr.passed:
+        return fr
 
     for check in (_confidence, _agreement, _open_trades, _strike_sanity):
         fr = check(result, cfg, open_trade_count)
@@ -90,6 +106,30 @@ def _open_trades(result: ConsensusResult, cfg: Config, open_trade_count: int) ->
         return FilterResult(
             passed=False,
             reason=f"open trades {open_trade_count} >= max {cfg.max_open_trades}",
+        )
+    return FilterResult(passed=True, reason="ok")
+
+
+def _loss_cooldown(
+    result: ConsensusResult, ticker_stats: dict[str, TickerStats] | None
+) -> FilterResult:
+    """Block a new entry on a ticker that just lost repeatedly — deterministic,
+    driven by this account's own execution history. The models never see this;
+    they'll keep proposing the trade, this is the layer that says no."""
+    if not ticker_stats:
+        return FilterResult(passed=True, reason="ok")
+    stats = ticker_stats.get(result.ticker)
+    if stats is None:
+        return FilterResult(passed=True, reason="ok")
+    if stats.loss_cooldown_active(
+        _LOSS_COOLDOWN_WINDOW, _LOSS_COOLDOWN_THRESHOLD, _LOSS_COOLDOWN_DAYS
+    ):
+        return FilterResult(
+            passed=False,
+            reason=(
+                f"loss cooldown: {result.ticker} had {_LOSS_COOLDOWN_THRESHOLD}+ losses in "
+                f"its last {_LOSS_COOLDOWN_WINDOW} trades within {_LOSS_COOLDOWN_DAYS}d"
+            ),
         )
     return FilterResult(passed=True, reason="ok")
 

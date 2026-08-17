@@ -17,6 +17,7 @@ import httpx
 from dotenv import load_dotenv
 
 from audit import storage as audit
+from audit.performance import get_ticker_stats
 
 from consensus.models import ConsensusResult
 from gate.config import Config
@@ -102,6 +103,9 @@ async def main_async() -> None:
     results = [ConsensusResult.model_validate(r) for r in raw]
     log.info("Loaded %d consensus results", len(results))
 
+    ticker_stats = get_ticker_stats()
+    log.info("Loaded performance history for %d ticker(s)", len(ticker_stats))
+
     approved: list[ApprovedTrade] = []
     forced_close_tickers: set[str] = set()
 
@@ -156,7 +160,7 @@ async def main_async() -> None:
         )
         new_buys = sum(1 for t in approved if t.proposal.action != "CLOSE")
         effective_open = existing_open_count - positions_closed + new_buys
-        filter_result = run_all(result, cfg, open_trade_count=effective_open)
+        filter_result = run_all(result, cfg, open_trade_count=effective_open, ticker_stats=ticker_stats)
 
         if not filter_result.passed:
             log.info("[%s] REJECTED by filter: %s", result.ticker, filter_result.reason)

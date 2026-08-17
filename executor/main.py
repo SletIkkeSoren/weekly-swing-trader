@@ -60,6 +60,21 @@ def _notify_fill(result: ExecutionResult, cfg: Config) -> None:
         log.warning("Discord fill notification failed for %s", result.ticker)
 
 
+def _poll_fill(client: AlpacaOptionsClient, order: dict, ticker: str) -> float | None:
+    """Best-effort wait for a fill price. Never raises — missing fill data just
+    means this trade won't be usable for performance stats later."""
+    order_id = order.get("id")
+    if not order_id:
+        return None
+    try:
+        filled = client.wait_for_fill(order_id)
+    except Exception:
+        log.warning("[%s] Fill poll failed for order %s", ticker, order_id)
+        return None
+    price = filled.get("filled_avg_price")
+    return float(price) if price else None
+
+
 def execute_close(
     trade: ApprovedTrade, client: AlpacaOptionsClient, cfg: Config,
 ) -> list[ExecutionResult]:
@@ -109,9 +124,11 @@ def execute_close(
                 "[%s] Close submitted: %s id=%s status=%s",
                 p.ticker, occ_symbol, order.get("id"), order.get("status"),
             )
+            filled_avg_price = _poll_fill(client, order, p.ticker)
             r = ExecutionResult(
                 ticker=p.ticker, occ_symbol=occ_symbol, action="CLOSE",
                 contracts=qty, order_id=order.get("id"), order_type="market",
+                filled_avg_price=filled_avg_price,
                 status="submitted", executed_at=now,
             )
             _notify_fill(r, cfg)
@@ -201,11 +218,13 @@ def execute_trade(
         )
 
     log.info("[%s] Order submitted: id=%s status=%s", p.ticker, order.get("id"), order.get("status"))
+    filled_avg_price = _poll_fill(client, order, p.ticker)
     result = ExecutionResult(
         ticker=p.ticker, occ_symbol=occ_symbol, action=p.action,
         strike=actual_strike, expiry=str(p.expiry),
         contracts=p.suggested_contracts, order_id=order.get("id"),
         order_type=order_type, limit_price=limit_price,
+        filled_avg_price=filled_avg_price,
         status="submitted", executed_at=now,
     )
     _notify_fill(result, cfg)

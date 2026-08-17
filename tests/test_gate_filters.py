@@ -5,6 +5,8 @@ Every hard-exit boundary, every filter in the chain, and the position-sizing
 formula are covered here. These tests do not touch any external API.
 """
 
+from datetime import date
+
 import pytest
 
 from gate.filters import check_hard_exits, run_all, suggested_contracts
@@ -110,7 +112,7 @@ class TestSuggestedContracts:
             input_dir="", output_dir="",
             min_confidence=0.65, min_agreement=2, max_open_trades=3,
             account_size=1_000.0, risk_pct=0.01,  # risk = $10 → 10/200 = 0 → floor to 1
-            max_contracts=5, webhook_url="", webhook_timeout_secs=30,
+            max_contracts=5, min_hold_confidence=0.75, webhook_url="", webhook_timeout_secs=30,
         )
         assert suggested_contracts(cfg) == 1
 
@@ -119,7 +121,7 @@ class TestSuggestedContracts:
             input_dir="", output_dir="",
             min_confidence=0.65, min_agreement=2, max_open_trades=3,
             account_size=10_000.0, risk_pct=0.05,  # risk = $500 → 500/200 = 2.5 → floor = 2
-            max_contracts=5, webhook_url="", webhook_timeout_secs=30,
+            max_contracts=5, min_hold_confidence=0.75, webhook_url="", webhook_timeout_secs=30,
         )
         assert suggested_contracts(cfg) == 2
 
@@ -128,7 +130,7 @@ class TestSuggestedContracts:
             input_dir="", output_dir="",
             min_confidence=0.65, min_agreement=2, max_open_trades=3,
             account_size=100_000.0, risk_pct=0.10,  # risk = $10000 → 50 raw → capped
-            max_contracts=5, webhook_url="", webhook_timeout_secs=30,
+            max_contracts=5, min_hold_confidence=0.75, webhook_url="", webhook_timeout_secs=30,
         )
         assert suggested_contracts(cfg) == 5
 
@@ -137,7 +139,7 @@ class TestSuggestedContracts:
             input_dir="", output_dir="",
             min_confidence=0.65, min_agreement=2, max_open_trades=3,
             account_size=20_000.0, risk_pct=0.01,  # risk = $200 → 200/200 = 1
-            max_contracts=5, webhook_url="", webhook_timeout_secs=30,
+            max_contracts=5, min_hold_confidence=0.75, webhook_url="", webhook_timeout_secs=30,
         )
         assert suggested_contracts(cfg) == 1
 
@@ -265,6 +267,51 @@ class TestRunAllClose:
         fr = run_all(result, gate_cfg, open_trade_count=0)
         assert fr.passed is False
         assert "agreement" in fr.reason
+
+
+# ── run_all — loss cooldown ─────────────────────────────────────────────────
+
+
+class TestLossCooldownFilter:
+    """Blind, deterministic loss cooldown: blocks new entries on a ticker whose
+    recent closed trades on this account went badly. Never fires for CLOSE."""
+
+    @staticmethod
+    def _cooling_down_stats():
+        from audit.performance import ClosedTrade, TickerStats
+
+        today_str = date.today().isoformat()
+        trades = [
+            ClosedTrade(ticker="TSLA", occ_symbol="a", open_price=1, close_price=2,
+                        return_pct=1.0, win=True, closed_at=today_str),
+            ClosedTrade(ticker="TSLA", occ_symbol="b", open_price=1, close_price=0.5,
+                        return_pct=-0.5, win=False, closed_at=today_str),
+            ClosedTrade(ticker="TSLA", occ_symbol="c", open_price=1, close_price=0.5,
+                        return_pct=-0.5, win=False, closed_at=today_str),
+        ]
+        return {"TSLA": TickerStats(ticker="TSLA", trades=trades)}
+
+    def test_no_stats_passed_means_no_cooldown(self, gate_cfg):
+        result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=None)
+        assert fr.passed is True
+
+    def test_ticker_with_no_history_is_unaffected(self, gate_cfg):
+        result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats={})
+        assert fr.passed is True
+
+    def test_recent_losing_streak_blocks_new_buy(self, gate_cfg):
+        result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._cooling_down_stats())
+        assert fr.passed is False
+        assert "cooldown" in fr.reason
+
+    def test_close_bypasses_loss_cooldown(self, gate_cfg):
+        """A losing streak must never block getting OUT of a position."""
+        result = make_consensus(action="CLOSE", confidence=0.75, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._cooling_down_stats())
+        assert fr.passed is True
 
 
 # ── Hard exit auto-approval (regression for dry-run bug) ──────────────────

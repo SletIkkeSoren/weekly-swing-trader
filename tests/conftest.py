@@ -154,6 +154,7 @@ def gate_cfg() -> GateConfig:
         account_size=10_000.0,
         risk_pct=0.01,
         max_contracts=5,
+        min_hold_confidence=0.75,
         webhook_url="",
         webhook_timeout_secs=30,
     )

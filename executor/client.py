@@ -5,6 +5,7 @@ Uses the trading REST API for orders and the data API for quotes.
 
 import logging
 import re
+import time
 from datetime import date
 
 import httpx
@@ -84,6 +85,27 @@ class AlpacaOptionsClient:
             r = client.post(f"{self._trading_base}/v2/orders", json=body)
             r.raise_for_status()
         return r.json()
+
+    def wait_for_fill(
+        self, order_id: str, timeout_secs: float = 10.0, poll_interval: float = 1.0
+    ) -> dict:
+        """Poll GET /v2/orders/{id} until it reaches a terminal state or timeout.
+
+        Returns the latest order dict. A still-open order (no filled_avg_price)
+        on timeout is not an error — callers should treat the fill as unknown.
+        """
+        deadline = time.monotonic() + timeout_secs
+        order: dict = {}
+        with httpx.Client(headers=self._headers, timeout=30) as client:
+            while True:
+                r = client.get(f"{self._trading_base}/v2/orders/{order_id}")
+                r.raise_for_status()
+                order = r.json()
+                if order.get("status") in ("filled", "canceled", "expired", "rejected"):
+                    return order
+                if time.monotonic() >= deadline:
+                    return order
+                time.sleep(poll_interval)
 
     def get_open_positions_for_ticker(self, ticker: str) -> list[dict]:
         """Return all open option positions for a given underlying ticker.
