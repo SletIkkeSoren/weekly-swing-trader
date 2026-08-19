@@ -9,7 +9,7 @@ from datetime import date
 
 import pytest
 
-from gate.filters import check_hard_exits, run_all, suggested_contracts
+from gate.filters import check_hard_exits, dynamic_confidence_threshold, run_all, suggested_contracts
 from gate.config import Config as GateConfig
 
 from tests.conftest import make_consensus, make_position
@@ -269,48 +269,60 @@ class TestRunAllClose:
         assert "agreement" in fr.reason
 
 
-# ── run_all — loss cooldown ─────────────────────────────────────────────────
+# ── run_all — dynamic confidence threshold ──────────────────────────────────
 
 
-class TestLossCooldownFilter:
-    """Blind, deterministic loss cooldown: blocks new entries on a ticker whose
-    recent closed trades on this account went badly. Never fires for CLOSE."""
+class TestDynamicConfidenceThreshold:
+    """Track-record-adjusted confidence bar: a losing streak raises the bar for
+    new entries, a winning streak lowers it (bounded by a floor). Replaces the
+    old binary loss-cooldown — a bad enough streak still blocks entries, but as
+    the extreme end of a continuum rather than a separate on/off rule. Never
+    fires for CLOSE — an exit must never be blocked by a bad streak."""
 
     @staticmethod
-    def _cooling_down_stats():
+    def _stats(*trades_pct: float):
         from audit.performance import ClosedTrade, TickerStats
 
         today_str = date.today().isoformat()
         trades = [
-            ClosedTrade(ticker="TSLA", occ_symbol="a", open_price=1, close_price=2,
-                        return_pct=1.0, win=True, closed_at=today_str),
-            ClosedTrade(ticker="TSLA", occ_symbol="b", open_price=1, close_price=0.5,
-                        return_pct=-0.5, win=False, closed_at=today_str),
-            ClosedTrade(ticker="TSLA", occ_symbol="c", open_price=1, close_price=0.5,
-                        return_pct=-0.5, win=False, closed_at=today_str),
+            ClosedTrade(ticker="TSLA", occ_symbol=f"t{i}", open_price=1, close_price=1 + pct,
+                        return_pct=pct, win=pct > 0, closed_at=today_str)
+            for i, pct in enumerate(trades_pct)
         ]
         return {"TSLA": TickerStats(ticker="TSLA", trades=trades)}
 
-    def test_no_stats_passed_means_no_cooldown(self, gate_cfg):
+    def test_no_stats_means_base_threshold(self, gate_cfg):
+        assert dynamic_confidence_threshold(gate_cfg.min_confidence, None) == gate_cfg.min_confidence
+
+    def test_too_few_trades_means_base_threshold(self, gate_cfg):
+        stats = self._stats(1.0, -0.5)["TSLA"]  # only 2 trades, below the minimum of 3
+        assert dynamic_confidence_threshold(gate_cfg.min_confidence, stats) == gate_cfg.min_confidence
+
+    def test_no_stats_passed_means_base_threshold(self, gate_cfg):
         result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
         fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=None)
         assert fr.passed is True
 
-    def test_ticker_with_no_history_is_unaffected(self, gate_cfg):
-        result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
-        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats={})
+    def test_recent_losing_streak_raises_bar_and_blocks_new_buy(self, gate_cfg):
+        result = make_consensus(action="BUY_CALL", confidence=0.70, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._stats(1.0, -0.5, -0.5))
+        assert fr.passed is False
+        assert "0.70" in fr.reason and "track-record adjusted" in fr.reason
+
+    def test_recent_winning_streak_lowers_bar_and_allows_lower_confidence(self, gate_cfg):
+        result = make_consensus(action="BUY_CALL", confidence=0.45, agreement_count=2)
+        # 0.45 fails the base 0.65 bar but clears the lowered, track-record bar
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._stats(0.5, 0.5, 0.5))
         assert fr.passed is True
 
-    def test_recent_losing_streak_blocks_new_buy(self, gate_cfg):
-        result = make_consensus(action="BUY_CALL", confidence=0.75, agreement_count=2)
-        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._cooling_down_stats())
-        assert fr.passed is False
-        assert "cooldown" in fr.reason
+    def test_winning_streak_never_lowers_bar_below_floor(self, gate_cfg):
+        stats = self._stats(0.5, 0.5, 0.5)["TSLA"]
+        assert dynamic_confidence_threshold(gate_cfg.min_confidence, stats) >= 0.35
 
-    def test_close_bypasses_loss_cooldown(self, gate_cfg):
+    def test_close_ignores_track_record(self, gate_cfg):
         """A losing streak must never block getting OUT of a position."""
-        result = make_consensus(action="CLOSE", confidence=0.75, agreement_count=2)
-        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._cooling_down_stats())
+        result = make_consensus(action="CLOSE", confidence=0.70, agreement_count=2)
+        fr = run_all(result, gate_cfg, open_trade_count=0, ticker_stats=self._stats(1.0, -0.5, -0.5))
         assert fr.passed is True
 
 

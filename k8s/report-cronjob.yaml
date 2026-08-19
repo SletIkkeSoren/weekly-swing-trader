@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: report
+  namespace: swing-trader
+spec:
+  # 30 min after executor — 23:00 UTC = 01:00 CEST (summer) / 00:00 CET (winter).
+  schedule: "0 23 * * 1-5"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1  # read-only + a Discord post — safe to retry once, unlike gate/executor
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: report
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
+              imagePullPolicy: Always
+              command: ["python", "-m", "report.main"]
+              env:
+                - name: MIN_CONFIDENCE
+                  value: "0.65"
+                - name: DISCORD_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-secrets
+                      key: approval_webhook_url
+                - name: AUDIT_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_endpoint
+                - name: AUDIT_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_bucket
+                - name: AUDIT_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_access_key
+                - name: AUDIT_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_secret_key

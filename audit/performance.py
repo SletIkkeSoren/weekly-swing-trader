@@ -45,20 +45,6 @@ class TickerStats:
     def avg_return_pct(self) -> float | None:
         return sum(t.return_pct for t in self.trades) / self.n if self.n else None
 
-    def loss_cooldown_active(
-        self, window: int, threshold: int, cooldown_days: int, today: date | None = None
-    ) -> bool:
-        """True if >= `threshold` of the last `window` trades were losses AND the
-        most recent of those trades closed within `cooldown_days`."""
-        if self.n < window:
-            return False
-        recent = self.trades[-window:]
-        if sum(not t.win for t in recent) < threshold:
-            return False
-        today = today or date.today()
-        last_closed = date.fromisoformat(recent[-1].closed_at[:10])
-        return (today - last_closed).days < cooldown_days
-
 
 def _reconcile(executions: list[dict]) -> list[ClosedTrade]:
     """Pair each opening execution with the next CLOSE on the same occ_symbol.

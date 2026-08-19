@@ -19,10 +19,12 @@ _STOP_LOSS_PCT = -0.25    # force CLOSE if down 25% or more
 _TAKE_PROFIT_PCT = 1.50   # force CLOSE if up 150% or more
 _MIN_DTE = 7              # force CLOSE if 7 or fewer days to expiry
 
-# Loss cooldown thresholds — blocks new entries on a ticker with a recent bad streak
-_LOSS_COOLDOWN_WINDOW = 3     # look at the last N closed trades for this ticker
-_LOSS_COOLDOWN_THRESHOLD = 2  # cooldown if at least this many of them were losses
-_LOSS_COOLDOWN_DAYS = 14      # cooldown lasts this long after the most recent of those losses
+# Dynamic confidence threshold — track-record-adjusted bar for new entries
+_TRACK_RECORD_MIN_TRADES = 3   # need at least this many closed trades before adjusting
+_WIN_RATE_WEIGHT = 0.4         # +/- swing in threshold from win rate alone
+_RETURN_WEIGHT = 0.5           # additional swing from avg return magnitude
+_THRESHOLD_FLOOR = 0.35        # never relax the bar below this, however good the streak
+_THRESHOLD_CEILING = 1.01      # push just past 1.0 so no confidence score can clear it
 
 
 def check_hard_exits(
@@ -49,8 +51,8 @@ def run_all(
     open_trade_count: int,
     ticker_stats: dict[str, TickerStats] | None = None,
 ) -> FilterResult:
-    # CLOSE actions skip strike sanity, open-trade cap, and loss cooldown
-    # (they reduce exposure, and a cooldown should never block an exit)
+    # CLOSE actions skip strike sanity, open-trade cap, and the track-record
+    # adjustment (they reduce exposure, and a bad streak should never block an exit)
     if result.consensus_action == "CLOSE":
         for check in (_confidence, _agreement):
             fr = check(result, cfg, open_trade_count)
@@ -58,11 +60,11 @@ def run_all(
                 return fr
         return FilterResult(passed=True, reason="ok")
 
-    fr = _loss_cooldown(result, ticker_stats)
+    fr = _confidence(result, cfg, open_trade_count, ticker_stats)
     if not fr.passed:
         return fr
 
-    for check in (_confidence, _agreement, _open_trades, _strike_sanity):
+    for check in (_agreement, _open_trades, _strike_sanity):
         fr = check(result, cfg, open_trade_count)
         if not fr.passed:
             return fr
@@ -82,12 +84,39 @@ def suggested_contracts(cfg: Config) -> int:
 
 # ── Individual filters ─────────────────────────────────────────────────────
 
-def _confidence(result: ConsensusResult, cfg: Config, _: int) -> FilterResult:
+def dynamic_confidence_threshold(base_min_confidence: float, stats: TickerStats | None) -> float:
+    """Track-record-adjusted confidence bar for a new entry on this ticker.
+
+    No history (or too little to be meaningful) -> base threshold, unchanged.
+    A ticker on a bad recent run raises the bar; a ticker on a good run lowers it
+    (never below the floor). A bad enough streak pushes the threshold above 1.0,
+    which subsumes the old hard cooldown as its extreme case instead of a separate
+    binary rule. Models never see this — it's computed entirely from this account's
+    own execution history (see CLAUDE.md core rules)."""
+    if stats is None or stats.n < _TRACK_RECORD_MIN_TRADES:
+        return base_min_confidence
+    win_rate = stats.win_rate or 0.0
+    avg_return = stats.avg_return_pct or 0.0
+    skew = (0.5 - win_rate) * _WIN_RATE_WEIGHT * 2
+    return_adj = -avg_return * _RETURN_WEIGHT
+    threshold = base_min_confidence + skew + return_adj
+    return max(_THRESHOLD_FLOOR, min(_THRESHOLD_CEILING, threshold))
+
+
+def _confidence(
+    result: ConsensusResult,
+    cfg: Config,
+    _: int,
+    ticker_stats: dict[str, TickerStats] | None = None,
+) -> FilterResult:
+    stats = ticker_stats.get(result.ticker) if ticker_stats else None
+    threshold = dynamic_confidence_threshold(cfg.min_confidence, stats)
     confidence = result.consensus_confidence or 0.0
-    if confidence < cfg.min_confidence:
+    if confidence < threshold:
+        detail = "" if threshold == cfg.min_confidence else f" (base {cfg.min_confidence}, track-record adjusted)"
         return FilterResult(
             passed=False,
-            reason=f"confidence {confidence:.2f} < min {cfg.min_confidence}",
+            reason=f"confidence {confidence:.2f} < min {threshold:.2f}{detail}",
         )
     return FilterResult(passed=True, reason="ok")
 
@@ -106,30 +135,6 @@ def _open_trades(result: ConsensusResult, cfg: Config, open_trade_count: int) ->
         return FilterResult(
             passed=False,
             reason=f"open trades {open_trade_count} >= max {cfg.max_open_trades}",
-        )
-    return FilterResult(passed=True, reason="ok")
-
-
-def _loss_cooldown(
-    result: ConsensusResult, ticker_stats: dict[str, TickerStats] | None
-) -> FilterResult:
-    """Block a new entry on a ticker that just lost repeatedly — deterministic,
-    driven by this account's own execution history. The models never see this;
-    they'll keep proposing the trade, this is the layer that says no."""
-    if not ticker_stats:
-        return FilterResult(passed=True, reason="ok")
-    stats = ticker_stats.get(result.ticker)
-    if stats is None:
-        return FilterResult(passed=True, reason="ok")
-    if stats.loss_cooldown_active(
-        _LOSS_COOLDOWN_WINDOW, _LOSS_COOLDOWN_THRESHOLD, _LOSS_COOLDOWN_DAYS
-    ):
-        return FilterResult(
-            passed=False,
-            reason=(
-                f"loss cooldown: {result.ticker} had {_LOSS_COOLDOWN_THRESHOLD}+ losses in "
-                f"its last {_LOSS_COOLDOWN_WINDOW} trades within {_LOSS_COOLDOWN_DAYS}d"
-            ),
         )
     return FilterResult(passed=True, reason="ok")
 

@@ -1,9 +1,7 @@
 """
 Tests for audit/performance.py — reconciling executions into closed trades and
-rolling them up into the stats the gate's loss-cooldown filter relies on.
+rolling them up into the stats the gate's dynamic confidence threshold relies on.
 """
-
-from datetime import date, timedelta
 
 import audit.performance as performance
 from audit.performance import ClosedTrade, TickerStats, _reconcile, get_ticker_stats
@@ -92,65 +90,6 @@ class TestReconcile:
         assert len(closed) == 2
         assert closed[0].win is True
         assert closed[1].win is False
-
-
-# ── TickerStats.loss_cooldown_active ────────────────────────────────────────
-
-
-def _closed_trade(win: bool, closed_at: str) -> ClosedTrade:
-    return ClosedTrade(
-        ticker="TSLA", occ_symbol="x", open_price=1.0,
-        close_price=2.0 if win else 0.5, return_pct=1.0 if win else -0.5,
-        win=win, closed_at=closed_at,
-    )
-
-
-class TestLossCooldown:
-    def test_fewer_trades_than_window_never_triggers(self):
-        stats = TickerStats(ticker="TSLA", trades=[_closed_trade(False, "2026-08-10")])
-        assert stats.loss_cooldown_active(3, 2, 14) is False
-
-    def test_below_loss_threshold_does_not_trigger(self):
-        trades = [
-            _closed_trade(True, "2026-08-01"),
-            _closed_trade(True, "2026-08-05"),
-            _closed_trade(False, "2026-08-10"),
-        ]
-        stats = TickerStats(ticker="TSLA", trades=trades)
-        assert stats.loss_cooldown_active(3, 2, 14) is False
-
-    def test_meeting_threshold_within_window_triggers(self):
-        trades = [
-            _closed_trade(True, "2026-08-01"),
-            _closed_trade(False, "2026-08-05"),
-            _closed_trade(False, "2026-08-10"),
-        ]
-        stats = TickerStats(ticker="TSLA", trades=trades)
-        today = date(2026, 8, 12)
-        assert stats.loss_cooldown_active(3, 2, 14, today=today) is True
-
-    def test_cooldown_expires_after_days_elapse(self):
-        trades = [
-            _closed_trade(False, "2026-07-01"),
-            _closed_trade(False, "2026-07-05"),
-            _closed_trade(True, "2026-07-10"),
-        ]
-        stats = TickerStats(ticker="TSLA", trades=trades)
-        # 2 of last 3 are still losses, but the most recent trade closed 30d ago
-        today = date(2026, 8, 9)
-        assert stats.loss_cooldown_active(3, 2, 14, today=today) is False
-
-    def test_only_last_window_trades_are_considered(self):
-        """4 trades, window=3: only the most recent 3 count, oldest loss ignored."""
-        trades = [
-            _closed_trade(False, "2026-08-01"),
-            _closed_trade(True, "2026-08-05"),
-            _closed_trade(True, "2026-08-08"),
-            _closed_trade(True, "2026-08-10"),
-        ]
-        stats = TickerStats(ticker="TSLA", trades=trades)
-        today = date(2026, 8, 11)
-        assert stats.loss_cooldown_active(3, 2, 14, today=today) is False
 
 
 # ── get_ticker_stats ─────────────────────────────────────────────────────────
