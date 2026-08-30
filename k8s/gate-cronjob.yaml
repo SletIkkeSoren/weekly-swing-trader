@@ -53,7 +53,7 @@ spec:
                 - name: MAX_CONTRACTS
                   value: "5"
                 - name: MIN_HOLD_CONFIDENCE
-                  value: "0.75"
+                  value: "0.45"
                 - name: APPROVAL_WEBHOOK_URL
                   valueFrom:
                     secretKeyRef:

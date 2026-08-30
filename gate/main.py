@@ -170,16 +170,21 @@ async def main_async() -> None:
                     result.consensus_action == "HOLD"
                     and hold_confidence < cfg.min_hold_confidence
                 )
+                # A CLOSE/HOLD-only vote (open positions restrict models to those
+                # two actions) can only fail to reach 2/3 agreement if a vote was
+                # rejected or timed out — infra noise, not a deliberate signal.
+                # Treat it as "try again next run", not as a reason to exit.
                 is_no_consensus = result.consensus_action is None
-                if is_weak_hold or is_no_consensus:
-                    # Weak HOLD or no agreement — models couldn't commit; exit.
-                    reason_label = (
-                        f"Weak HOLD ({hold_confidence:.0%} confidence)"
-                        if is_weak_hold
-                        else f"No consensus ({result.agreement_count}/3 models)"
-                    )
+                # The weak-HOLD valve exists to close positions the models won't
+                # defend, not to take profit on the models' behalf. A position
+                # that's currently green already has its own HOLD instruction
+                # (per consensus/prompt.py: small swings are noise) — only force
+                # the exit when every open lot on this ticker is flat or red.
+                is_losing = all(p.pnl_pct <= 0 for p in result.open_positions)
+                if is_weak_hold and is_losing:
+                    reason_label = f"Weak HOLD ({hold_confidence:.0%} confidence)"
                     log.warning(
-                        "[%s] %s — auto-closing",
+                        "[%s] %s on a losing position — auto-closing",
                         result.ticker,
                         reason_label,
                     )
@@ -207,6 +212,20 @@ async def main_async() -> None:
                         forced_close_tickers.add(pos.ticker)
                         mark_closed(pos.ticker, cfg.output_dir)
                 else:
+                    if is_no_consensus:
+                        log.info(
+                            "[%s] No consensus (%d/3 models, likely a rejected vote) "
+                            "— leaving position open, will re-evaluate next run",
+                            result.ticker,
+                            result.agreement_count,
+                        )
+                    elif is_weak_hold:
+                        log.info(
+                            "[%s] Weak HOLD (%.0f%% confidence) but position is green — "
+                            "leaving open",
+                            result.ticker,
+                            hold_confidence * 100,
+                        )
                     await _notify_hold(result, cfg)
             continue
 

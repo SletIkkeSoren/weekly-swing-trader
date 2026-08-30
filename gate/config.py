@@ -17,7 +17,10 @@ class Config:
     risk_pct: float         # fraction of account to risk per trade (e.g. 0.01 = 1%)
     max_contracts: int      # hard cap regardless of sizing formula
 
-    # Hold confidence threshold — HOLD below this triggers an auto-CLOSE
+    # Hold confidence threshold — on a losing position, HOLD below this triggers
+    # an auto-CLOSE (models couldn't commit to defending it). Deliberately lower
+    # than min_confidence: a HOLD is a lower-conviction call than a fresh entry
+    # by nature, so it shouldn't need to clear a higher bar to survive.
     min_hold_confidence: float
 
     # Human approval webhook
@@ -37,7 +40,7 @@ class Config:
             account_size=float(os.environ["ACCOUNT_SIZE"]),
             risk_pct=float(os.getenv("RISK_PCT", "0.01")),
             max_contracts=int(os.getenv("MAX_CONTRACTS", "5")),
-            min_hold_confidence=float(os.getenv("MIN_HOLD_CONFIDENCE", "0.75")),
+            min_hold_confidence=float(os.getenv("MIN_HOLD_CONFIDENCE", "0.45")),
             webhook_url=os.getenv("APPROVAL_WEBHOOK_URL", ""),
             webhook_timeout_secs=int(os.getenv("WEBHOOK_TIMEOUT_SECS", "300")),
         )
