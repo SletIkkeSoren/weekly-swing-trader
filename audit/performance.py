@@ -16,6 +16,15 @@ log = logging.getLogger("audit.performance")
 
 _LOOKBACK_DAYS = 90
 
+# Every closed trade before this date was forced shut by one of two bugs fixed
+# in 5294b20 (weak-HOLD auto-close firing regardless of P&L; a no-consensus vote
+# — infra noise, e.g. a rate-limited model call — treated as a reason to exit).
+# Confirmed via the audit trail: 100% of closes before this date trace back to
+# one of those two, none were a genuine 2/3-model consensus CLOSE. Track record
+# from before this date isn't a real performance signal, so it's excluded here
+# rather than left to quietly keep tickers locked out on contaminated history.
+_TRACK_RECORD_SINCE = date(2026, 8, 30)
+
 
 @dataclass
 class ClosedTrade:
@@ -90,7 +99,7 @@ def get_ticker_stats(lookback_days: int = _LOOKBACK_DAYS) -> dict[str, TickerSta
     Returns {} if audit S3 is disabled or has no history yet — callers must treat
     that as "no track record", not an error.
     """
-    since = date.today() - timedelta(days=lookback_days)
+    since = max(date.today() - timedelta(days=lookback_days), _TRACK_RECORD_SINCE)
     executions = load_stage("executions", since)
     if not executions:
         return {}

@@ -24,7 +24,13 @@ _TRACK_RECORD_MIN_TRADES = 3   # need at least this many closed trades before ad
 _WIN_RATE_WEIGHT = 0.4         # +/- swing in threshold from win rate alone
 _RETURN_WEIGHT = 0.5           # additional swing from avg return magnitude
 _THRESHOLD_FLOOR = 0.35        # never relax the bar below this, however good the streak
-_THRESHOLD_CEILING = 1.01      # push just past 1.0 so no confidence score can clear it
+_THRESHOLD_CEILING = 0.95      # keep it below 1.0 — a streak this bad should be very hard
+                                # to trade past, not mathematically impossible forever. A
+                                # ceiling >=1.0 is a one-way door: no confidence score can
+                                # ever clear it, so a ticker that hits it can only recover
+                                # once its bad trades age out of the lookback window (see
+                                # audit/performance.py _LOOKBACK_DAYS) rather than by
+                                # actually trading its way back to a better track record.
 
 
 def check_hard_exits(
