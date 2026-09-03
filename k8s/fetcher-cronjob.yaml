@@ -4,8 +4,10 @@ metadata:
   name: fetcher
   namespace: swing-trader
 spec:
-  # Once daily after market close — 21:00 UTC = 23:00 CEST (summer) / 22:00 CET (winter).
-  schedule: "0 21 * * 1-5"
+  # Pre-open — 12:00 UTC. The US session opens 13:30 UTC (summer) / 14:30 UTC
+  # (winter), so the last daily bar available here is always the previous
+  # session's completed close, exactly as it was on the old post-close schedule.
+  schedule: "0 12 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

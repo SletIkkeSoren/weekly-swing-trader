@@ -5,7 +5,8 @@ metadata:
   namespace: swing-trader
 spec:
   # 30 min after fetcher — 21:30 UTC = 23:30 CEST (summer) / 22:30 CET (winter).
-  schedule: "30 21 * * 1-5"
+  # 30 min after fetcher, still pre-open — 12:30 UTC.
+  schedule: "30 12 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

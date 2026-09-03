@@ -4,8 +4,9 @@ metadata:
   name: report
   namespace: swing-trader
 spec:
-  # 30 min after executor — 23:00 UTC = 01:00 CEST (summer) / 00:00 CET (winter).
-  schedule: "0 23 * * 1-5"
+  # After the close — 21:30 UTC = 17:30 EDT (summer) / 16:30 EST (winter),
+  # i.e. 23:30 CEST / 22:30 CET.
+  schedule: "30 21 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

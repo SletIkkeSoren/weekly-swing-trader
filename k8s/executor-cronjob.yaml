@@ -4,8 +4,11 @@ metadata:
   name: executor
   namespace: swing-trader
 spec:
-  # 90 min after fetcher — 22:30 UTC = 00:30 CEST (summer) / 23:30 CET (winter).
-  schedule: "30 22 * * 1-5"
+  # MUST run while the US options market is open — Alpaca rejects options orders
+  # outside regular hours with a 422. 15:00 UTC is inside the session year-round:
+  # 11:00 EDT in summer (open 13:30-20:00 UTC), 10:00 EST in winter (14:30-21:00 UTC).
+  # Running this after the close is what silently killed execution 2026-08-31.
+  schedule: "0 15 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -55,6 +58,20 @@ spec:
                   value: "1.05"
                 - name: DRY_RUN
                   value: "false"
+                # Refuse to submit while the market is closed rather than
+                # collecting 422s from Alpaca.
+                - name: REQUIRE_MARKET_OPEN
+                  value: "true"
+                # approved.json lives on the shared PVC; anything older than this
+                # means the gate did not run today and must not be executed.
+                - name: MAX_APPROVAL_AGE_HOURS
+                  value: "6"
+                # No quote -> skip the trade. A market order on an option with an
+                # unknown spread can fill anywhere.
+                - name: ALLOW_MARKET_FALLBACK
+                  value: "false"
+                - name: ALPACA_OPTIONS_FEED
+                  value: "indicative"
                 - name: DISCORD_WEBHOOK_URL
                   valueFrom:
                     secretKeyRef:

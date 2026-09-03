@@ -1,5 +1,5 @@
 """
-Alpaca options client — contract lookup and order placement.
+Alpaca options client — contract lookup, market clock, quotes, and order placement.
 Uses the trading REST API for orders and the data API for quotes.
 """
 
@@ -17,13 +17,43 @@ log = logging.getLogger("executor.client")
 _DATA_BASE = "https://data.alpaca.markets"
 
 
+class AlpacaError(RuntimeError):
+    """An Alpaca API error that carries the response body.
+
+    httpx's raise_for_status() reports the status code only, which turned every
+    rejected order into a bare "422 Unprocessable Entity" with no way to tell a
+    closed market from an untradeable contract. Always raise this instead.
+    """
+
+    def __init__(self, resp: httpx.Response) -> None:
+        body = " ".join((resp.text or "").split())[:500]
+        super().__init__(
+            f"HTTP {resp.status_code} from {resp.request.url.path}: {body or '<empty body>'}"
+        )
+        self.status_code = resp.status_code
+        self.body = body
+
+
+def _check(resp: httpx.Response) -> httpx.Response:
+    if resp.is_error:
+        raise AlpacaError(resp)
+    return resp
+
+
 class AlpacaOptionsClient:
     def __init__(self, cfg: Config) -> None:
         self._trading_base = cfg.alpaca_base_url.rstrip("/")
+        self._options_feed = cfg.options_feed
         self._headers = {
             "APCA-API-KEY-ID": cfg.alpaca_api_key,
             "APCA-API-SECRET-KEY": cfg.alpaca_secret_key,
         }
+
+    def get_clock(self) -> dict:
+        """Return Alpaca's market clock: {timestamp, is_open, next_open, next_close}."""
+        with httpx.Client(headers=self._headers, timeout=15) as client:
+            r = client.get(f"{self._trading_base}/v2/clock")
+        return _check(r).json()
 
     def find_contract(
         self, ticker: str, expiry: date, strike: float, option_type: str
@@ -41,28 +71,38 @@ class AlpacaOptionsClient:
         }
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.get(f"{self._trading_base}/v2/options/contracts", params=params)
-            r.raise_for_status()
+            _check(r)
         contracts = r.json().get("option_contracts", [])
         if not contracts:
             return None
         # Pick the strike closest to what the models proposed
         return min(contracts, key=lambda c: abs(float(c["strike_price"]) - strike))
 
-    def get_ask_price(self, ticker: str, occ_symbol: str) -> float | None:
-        """Return the latest ask price for a contract, or None if unavailable."""
+    def get_ask_price(self, occ_symbol: str) -> float | None:
+        """Return the latest ask price for one contract, or None if unavailable.
+
+        Uses the multi-contract snapshot route (/options/snapshots?symbols=...).
+        The per-underlying route (/options/snapshots/{underlying}) returns the whole
+        option chain and rejects a `symbols` filter with a 400 — that mismatch is
+        what silently downgraded every order to a market order.
+        """
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.get(
-                f"{_DATA_BASE}/v1beta1/options/snapshots/{ticker}",
-                params={"symbols": occ_symbol, "feed": "indicative"},
+                f"{_DATA_BASE}/v1beta1/options/snapshots",
+                params={"symbols": occ_symbol, "feed": self._options_feed},
             )
-        if r.status_code != 200:
-            log.warning("Quote fetch failed for %s: HTTP %s", occ_symbol, r.status_code)
+        if r.is_error:
+            log.warning("Quote fetch failed for %s: %s", occ_symbol, AlpacaError(r))
             return None
         snap = r.json().get("snapshots", {}).get(occ_symbol)
         if snap is None:
+            log.warning("No snapshot returned for %s (feed=%s)", occ_symbol, self._options_feed)
             return None
         ask = float(snap.get("latestQuote", {}).get("ap", 0))
-        return ask if ask > 0 else None
+        if ask <= 0:
+            log.warning("Snapshot for %s has no usable ask (ap=%s)", occ_symbol, ask)
+            return None
+        return ask
 
     def place_order(
         self,
@@ -83,7 +123,7 @@ class AlpacaOptionsClient:
             body["limit_price"] = str(round(limit_price, 2))
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.post(f"{self._trading_base}/v2/orders", json=body)
-            r.raise_for_status()
+            _check(r)
         return r.json()
 
     def wait_for_fill(
@@ -99,7 +139,7 @@ class AlpacaOptionsClient:
         with httpx.Client(headers=self._headers, timeout=30) as client:
             while True:
                 r = client.get(f"{self._trading_base}/v2/orders/{order_id}")
-                r.raise_for_status()
+                _check(r)
                 order = r.json()
                 if order.get("status") in ("filled", "canceled", "expired", "rejected"):
                     return order
@@ -115,7 +155,7 @@ class AlpacaOptionsClient:
         """
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.get(f"{self._trading_base}/v2/positions")
-            r.raise_for_status()
+            _check(r)
         results = []
         for p in r.json():
             if p.get("asset_class") != "us_option":
@@ -129,5 +169,5 @@ class AlpacaOptionsClient:
         """Sell-to-close an open position via DELETE /v2/positions/{symbol}."""
         with httpx.Client(headers=self._headers, timeout=30) as client:
             r = client.delete(f"{self._trading_base}/v2/positions/{occ_symbol}")
-            r.raise_for_status()
+            _check(r)
         return r.json()

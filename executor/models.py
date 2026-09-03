@@ -15,6 +15,9 @@ class ExecutionResult(BaseModel):
     order_type: str
     limit_price: float | None = None
     filled_avg_price: float | None = None  # None if not filled within the poll window
-    status: Literal["submitted", "dry_run", "error"]
+    # filled   — Alpaca confirmed the fill within the poll window
+    # submitted— accepted by Alpaca, fill still unknown when we stopped polling
+    # skipped  — deliberately not sent (e.g. no quote available)
+    status: Literal["filled", "submitted", "dry_run", "skipped", "error"]
     reason: str = ""
     executed_at: datetime

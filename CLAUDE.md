@@ -7,9 +7,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project: Alpaca Options Trading Bot
 
 ### Architecture
-- Data fetcher → Consensus engine (Claude + GPT-4o + Gemini) → Decision gate → Executor
+- Data fetcher → Consensus engine (Claude + GPT-4o + Gemini) → Decision gate → Executor → EOD report
 - Runs on k3s as CronJobs
 - Paper trading first via Alpaca sandbox API
+
+### Daily timing (all UTC, Mon–Fri)
+The analysis stages run **pre-open** so the models reason on the last completed
+daily bar; the executor runs **inside the session** because Alpaca rejects options
+orders outside regular hours with a 422.
+
+| Time  | Stage     | Why |
+|-------|-----------|-----|
+| 12:00 | fetcher   | pre-open; last bar = previous session's close |
+| 12:30 | consensus | pre-open                                      |
+| 13:00 | gate      | pre-open; must finish before 13:30 (earliest open) |
+| 15:00 | executor  | **in-session year-round** (11:00 EDT / 10:00 EST) |
+| 21:30 | report    | after the close                               |
+
+Never schedule the executor outside 14:30–20:00 UTC — that window is the only one
+open in both US DST regimes. Running it post-close silently killed all execution
+from 2026-08-31 to 09-02.
 
 ### Core Rules (never violate these)
 - LLMs reason about data, they never recall market facts
@@ -50,7 +67,7 @@ Pipeline stage 1. Fetches OHLCV bars from Alpaca, computes all TA indicators, wr
 
 Indicators computed: EMA 8/21/50/200, RSI-14, MACD(12,26,9), Bollinger Bands(20,2σ), ATR-14, HV-20 (annualised), volume ratio, nearest S/R pivots.
 
-k8s manifest: `k8s/fetcher-cronjob.yaml` — runs Mon–Fri 21:00 UTC; reads Alpaca credentials from `alpaca-credentials` secret.
+k8s manifest: `k8s/fetcher-cronjob.yaml` — runs Mon–Fri 12:00 UTC (pre-open); reads Alpaca credentials from `alpaca-credentials` secret.
 
 ## Module: consensus/
 
@@ -67,7 +84,7 @@ Pipeline stage 2. Reads `$INPUT_DIR/snapshots.json`, fans out to Claude + GPT-4o
 python -m consensus.main
 ```
 
-k8s manifest: `k8s/consensus-cronjob.yaml` — runs Mon–Fri 21:30 UTC (30 min after fetcher); reads LLM keys from `llm-credentials` secret.
+k8s manifest: `k8s/consensus-cronjob.yaml` — runs Mon–Fri 12:30 UTC (30 min after fetcher); reads LLM keys from `llm-credentials` secret.
 
 ## Module: gate/
 
@@ -83,4 +100,62 @@ Pipeline stage 3. Reads `$INPUT_DIR/consensus.json`, applies risk filters, sizes
 python -m gate.main
 ```
 
-k8s manifest: `k8s/gate-cronjob.yaml` — runs Mon–Fri 22:00 UTC; `APPROVAL_WEBHOOK_URL` from `gate-secrets` secret.
+k8s manifest: `k8s/gate-cronjob.yaml` — runs Mon–Fri 13:00 UTC; `APPROVAL_WEBHOOK_URL` from `gate-secrets` secret.
+
+The Discord embed the gate posts is an **approval**, not a fill. Only the executor knows whether an order reached the market.
+
+## Module: executor/
+
+Pipeline stage 4. Reads `$INPUT_DIR/approved.json`, places option orders on Alpaca,
+writes `$OUTPUT_DIR/executions.json` and posts the real outcome to Discord.
+
+- `config.py` — order type/sizing plus the safety switches below
+- `client.py` — `AlpacaOptionsClient`: contract lookup, `/v2/clock`, quotes, orders.
+  All responses go through `_check()`, which raises `AlpacaError` **carrying the
+  response body** — `raise_for_status()` alone reduced every rejection to a bare
+  "422 Unprocessable Entity"
+- `main.py` — CronJob entrypoint; `backoffLimit: 0` in k8s to prevent double-ordering
+
+Three preflight guards run before any order, because `approved.json` persists on the
+shared PVC and a blind re-read is a duplicate order:
+
+1. **staleness** — batch older than `MAX_APPROVAL_AGE_HOURS` (6) is dropped; means the gate didn't run
+2. **dedup** — `executed_batch.json` records the batch key *before* ordering, so a crash or manual re-run can't replay it
+3. **market open** — `REQUIRE_MARKET_OPEN=true` checks `/v2/clock` and aborts loudly rather than collecting 422s
+
+Quotes come from `/v1beta1/options/snapshots?symbols=…` (the multi-contract route;
+the per-underlying route rejects a `symbols` filter with a 400). With no ask quote the
+trade is **skipped**, not sent as a market order — set `ALLOW_MARKET_FALLBACK=true` to
+restore the old behaviour.
+
+Execution status is `filled` (fill confirmed) / `submitted` (accepted, fill unknown) /
+`skipped` / `error` / `dry_run`. Only `filled` and `submitted` count as real orders in
+`audit/performance.py`.
+
+```bash
+python -m executor.main
+```
+
+k8s manifest: `k8s/executor-cronjob.yaml` — runs Mon–Fri 15:00 UTC, **in-session**.
+
+## Module: report/
+
+Pipeline stage 5. Read-only. Posts the end-of-day Discord summary from the audit
+trail; writes nothing.
+
+- `build.py` — `build_report(ticker_stats, approved_today, executions_today, today, base_min_confidence)`
+- `main.py` — CronJob entrypoint
+
+It reads **both** approvals and executions and flags any gap between them. Reporting
+approvals alone is how three days of rejected orders were still summarised as trades taken.
+
+```bash
+python -m report.main
+```
+
+k8s manifest: `k8s/report-cronjob.yaml` — runs Mon–Fri 21:30 UTC (after the close).
+
+## Operational notes
+
+- The Docker image **must** contain `curl`: every CronJob's failure-alert hook shells
+  out to it. Without it the alert dies with `curl: not found` and failures pass silently.

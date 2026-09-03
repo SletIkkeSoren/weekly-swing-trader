@@ -12,7 +12,11 @@ class Config:
     order_type: str      # "market" or "limit"
     limit_buffer: float  # multiplier on ask for limit price, e.g. 1.05
     dry_run: bool
-    discord_webhook_url: str  # optional; empty = no fill notifications
+    discord_webhook_url: str  # optional; empty = no execution notifications
+    options_feed: str         # "indicative" (free) or "opra" (paid)
+    require_market_open: bool  # refuse to submit orders while the market is closed
+    max_approval_age_hours: float  # refuse to execute a stale approved.json
+    allow_market_fallback: bool    # if no ask quote, send a market order instead of skipping
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -26,4 +30,8 @@ class Config:
             limit_buffer=float(os.getenv("LIMIT_PRICE_BUFFER", "1.05")),
             dry_run=os.getenv("DRY_RUN", "false").lower() == "true",
             discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", ""),
+            options_feed=os.getenv("ALPACA_OPTIONS_FEED", "indicative"),
+            require_market_open=os.getenv("REQUIRE_MARKET_OPEN", "true").lower() == "true",
+            max_approval_age_hours=float(os.getenv("MAX_APPROVAL_AGE_HOURS", "6")),
+            allow_market_fallback=os.getenv("ALLOW_MARKET_FALLBACK", "false").lower() == "true",
         )

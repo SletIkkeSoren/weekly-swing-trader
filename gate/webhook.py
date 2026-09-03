@@ -8,6 +8,8 @@ Two modes depending on APPROVAL_WEBHOOK_URL:
   Discord URL    → posts a formatted embed to Discord and auto-approves.
                    (Discord incoming webhooks are one-way; no response-based
                    approval is possible. Suitable for paper trading.)
+                   The embed announces an approval only — the executor stage
+                   reports whether the order actually reached the market.
 
   Other URL      → interactive mode: POSTs TradeProposal JSON and waits for
                    {"approved": true/false, "reason": "..."} in response.
@@ -59,7 +61,9 @@ def _discord_embed(proposal: TradeProposal) -> dict:
                 {"name": "Thesis",     "value": reasoning[:256]},
                 {"name": "Watch if",   "value": condition[:256]},
             ],
-            "footer": {"text": "paper trading — auto-approved"},
+            # This is an approval, not a fill. The executor places the order in its
+            # own CronJob and posts the real outcome (FILLED / SUBMITTED / REJECTED).
+            "footer": {"text": "approved — order not placed yet, watch for the executor's message"},
             "timestamp": proposal.as_of.isoformat(),
         }]
     }

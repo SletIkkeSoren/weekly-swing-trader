@@ -54,7 +54,7 @@ async def _notify_hard_exit(proposal: TradeProposal, cfg: Config) -> None:
                 {"name": "Reason", "value": proposal.all_reasoning[0], "inline": False},
                 {"name": "Contracts", "value": str(proposal.suggested_contracts), "inline": True},
             ],
-            "footer": {"text": "auto-approved — no human approval required"},
+            "footer": {"text": "auto-approved — order not placed yet, watch for the executor's message"},
             "timestamp": proposal.as_of.isoformat(),
         }]
     }

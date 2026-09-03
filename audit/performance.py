@@ -64,8 +64,11 @@ def _reconcile(executions: list[dict]) -> list[ClosedTrade]:
     open_by_symbol: dict[str, dict] = {}
     closed: list[ClosedTrade] = []
 
+    # "submitted" is the legacy status for an accepted order; "filled" is written
+    # once the executor confirms the fill. Both are real orders — everything else
+    # (error, skipped, dry_run) never reached the market.
     for ex in executions:
-        if ex.get("status") != "submitted":
+        if ex.get("status") not in ("submitted", "filled"):
             continue
         occ = ex.get("occ_symbol")
         if not occ:

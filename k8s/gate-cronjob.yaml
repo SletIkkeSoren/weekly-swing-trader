@@ -5,7 +5,9 @@ metadata:
   namespace: swing-trader
 spec:
   # 60 min after fetcher — 22:00 UTC = 00:00 CEST (summer) / 23:00 CET (winter).
-  schedule: "0 22 * * 1-5"
+  # 30 min after consensus, still pre-open — 13:00 UTC. Must finish before the
+  # earliest possible open (13:30 UTC in summer) so the executor has a fresh batch.
+  schedule: "0 13 * * 1-5"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
