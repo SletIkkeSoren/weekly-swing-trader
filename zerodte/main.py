@@ -52,6 +52,26 @@ def _save(cfg: Config, trade: ZeroDteTrade) -> None:
     path.write_text(trade.model_dump_json(indent=2))
 
 
+def recent_day_trades(cfg: Config, today) -> int:
+    """Round trips this runner made in the previous 4 business days (today's would be the 5th).
+
+    Every filled 0DTE trade here is opened and closed the same day. Counted from our
+    own state files because Alpaca's account payload no longer reliably carries
+    `daytrade_count` — without this the PDT guard silently read 0 every day.
+    """
+    count, day, seen = 0, today, 0
+    while seen < 4:
+        day -= timedelta(days=1)
+        if day.weekday() >= 5:
+            continue
+        seen += 1
+        path = _state_path(cfg, day)
+        if path.exists():
+            t = ZeroDteTrade.model_validate_json(path.read_text())
+            count += t.qty > 0 and t.status in ("open", "take_profit", "cutoff", "error")
+    return count
+
+
 def _notify(cfg: Config, text: str) -> None:
     log.info(text)
     if not cfg.discord_webhook_url:
@@ -93,8 +113,9 @@ def enter(cfg: Config, client: ZeroDteClient) -> None:
 
     acct = client.account()
     equity = float(acct["equity"])
-    if equity < PDT_EQUITY and int(acct.get("daytrade_count", 0)) >= cfg.max_day_trades:
-        return skip(f"PDT limit — {acct['daytrade_count']} day trades in the last 5 days", equity_before=equity)
+    day_trades = max(int(acct.get("daytrade_count") or 0), recent_day_trades(cfg, today))
+    if equity < PDT_EQUITY and day_trades >= cfg.max_day_trades:
+        return skip(f"PDT limit — {day_trades} day trades in the last 5 business days", equity_before=equity)
 
     bars = client.spy_minute_bars(datetime.combine(today, time(9, 30), ET),
                                   datetime.combine(today, strategy.DECIDE, ET))

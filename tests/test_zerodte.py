@@ -175,6 +175,28 @@ def test_enter_skips_at_pdt_limit(cfg):
     assert c.submitted == [] and _state(cfg).status == "skipped"
 
 
+def _write_past(cfg, day, status="cutoff", qty=1):
+    t = ZeroDteTrade(day=day, status=status, qty=qty)
+    runner._save(cfg, t)
+
+
+def test_enter_counts_own_day_trades_when_alpaca_omits_them(cfg):
+    # DAY is Monday 2026-09-28; the previous 4 business days are Tue 22 – Fri 25
+    for d in (22, 23, 25):
+        _write_past(cfg, date(2026, 9, d))
+    c = FakeClient(daytrades=None)
+    runner.enter(cfg, c)
+    assert c.submitted == [] and "PDT" in _state(cfg).reason
+
+
+def test_skipped_and_old_days_do_not_count_as_day_trades(cfg):
+    _write_past(cfg, date(2026, 9, 21))                      # 5 business days ago: outside window
+    _write_past(cfg, date(2026, 9, 22), status="skipped", qty=0)
+    _write_past(cfg, date(2026, 9, 23), status="unfilled", qty=0)
+    _write_past(cfg, date(2026, 9, 25))
+    assert runner.recent_day_trades(cfg, DAY) == 1
+
+
 def test_enter_skips_when_market_closed(cfg):
     c = FakeClient(now_open=False)
     runner.enter(cfg, c)

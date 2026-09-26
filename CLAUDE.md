@@ -186,8 +186,10 @@ break-even, high-variance bet; sized at `RISK_FRACTION` (20%) of **current** equ
 - `main.py` — `enter` (10:01 ET) / `exit` (15:30 ET); state in `$STATE_DIR/{date}.json`
 
 Guards in `enter`: market open and a full session (half days skipped), now inside
-10:00–10:10 ET, no state for today (never buys twice), PDT (`daytrade_count` <
-`MAX_DAY_TRADES` under $25k — every trade here is a day trade).
+10:00–10:10 ET, no state for today (never buys twice), PDT (< `MAX_DAY_TRADES` round
+trips in the previous 4 business days under $25k — every trade here is a day trade).
+The count comes from the runner's own state files: this account's `/v2/account`
+payload has no `daytrade_count`, so reading Alpaca alone made the guard a no-op.
 
 k8s: `k8s/zerodte-cronjob.yaml` — two CronJobs with `timeZone: America/New_York`, so
 DST needs no UTC conversion. Uses a **separate $1,000 paper account**
