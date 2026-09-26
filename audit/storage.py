@@ -103,6 +103,18 @@ def record_approved(trades: list, run_at: str | None = None) -> None:
         log.exception("Audit write failed (approved) — pipeline continues")
 
 
+def record_zerodte(trades: list, run_at: str | None = None) -> None:
+    """Append 0DTE runner outcomes (zerodte/{date}.jsonl). No-op if AUDIT_S3_ENDPOINT is unset."""
+    if not _is_enabled():
+        return
+    try:
+        ts = run_at or datetime.now(timezone.utc).isoformat()
+        records = [t.model_dump(mode="json") for t in trades]
+        _append_jsonl("zerodte", records, ts)
+    except Exception:
+        log.exception("Audit write failed (zerodte) — pipeline continues")
+
+
 def record_executions(results: list, run_at: str | None = None) -> None:
     """Append executor results. No-op if AUDIT_S3_ENDPOINT is unset."""
     if not _is_enabled():

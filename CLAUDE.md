@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project: Alpaca Options Trading Bot
 
+> **Status (2026-09-26):** the daily LLM-consensus options pipeline (fetcher →
+> consensus → gate → executor → report) is **retired** — its CronJobs carry
+> `suspend: true`. Backtests in `backtest/` found no edge for it. The live strategy
+> is now `zerodte/` (see below). The sections on the old stages are kept for reference.
+
 ### Architecture
 - Data fetcher → Consensus engine (Claude + GPT-4o + Gemini) → Decision gate → Executor → EOD report
 - Runs on k3s as CronJobs
@@ -154,6 +159,39 @@ python -m report.main
 ```
 
 k8s manifest: `k8s/report-cronjob.yaml` — runs Mon–Fri 21:30 UTC (after the close).
+
+## Module: backtest/
+
+Research only — never imported by a live stage. `pip install -r requirements-backtest.txt`
+(yfinance). Data caches in `.cache/backtest/` (gitignored).
+
+- `main.py` — TA signals traded as debit spreads (BS-priced, HV proxy)
+- `shares.py` — RSI-2 pullback with ETF shares vs random-entry baseline
+- `putspread.py` — SPY put credit spreads priced from VIX + skew; sizing is a % of current equity
+- `zerodte.py` — SPY 0DTE on **real** Alpaca minute bars (Feb 2024→). `fetch` needs
+  Alpaca keys, `run [--band 0.80,1.10]` is offline. 2024 is in-sample, 2025→ out-of-sample
+
+Always compare against a baseline (random entry / buy-and-hold) and judge rules on
+the out-of-sample period only.
+
+## Module: zerodte/
+
+The live strategy: the one rule that held up out-of-sample in `backtest/zerodte.py` —
+opening-range breakout (9:30–9:44 ET range, decided at 10:00 ET) → buy one same-day
+SPY call/put priced $0.80–1.10, limit sell at 2x, sell the rest at 15:30 ET. A near
+break-even, high-variance bet; sized at `RISK_FRACTION` (20%) of **current** equity.
+
+- `strategy.py` — pure logic (signal, OTM candidates, contract pick, sizing); tested
+- `client.py` — Alpaca REST (clock, account, IEX minute bars, option snapshots, orders)
+- `main.py` — `enter` (10:01 ET) / `exit` (15:30 ET); state in `$STATE_DIR/{date}.json`
+
+Guards in `enter`: market open and a full session (half days skipped), now inside
+10:00–10:10 ET, no state for today (never buys twice), PDT (`daytrade_count` <
+`MAX_DAY_TRADES` under $25k — every trade here is a day trade).
+
+k8s: `k8s/zerodte-cronjob.yaml` — two CronJobs with `timeZone: America/New_York`, so
+DST needs no UTC conversion. Uses a **separate $1,000 paper account**
+(`alpaca-zerodte-credentials` secret), audit stage `zerodte/`.
 
 ## Operational notes
 

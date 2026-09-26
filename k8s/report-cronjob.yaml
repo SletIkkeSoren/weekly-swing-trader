@@ -7,6 +7,9 @@ spec:
   # After the close — 21:30 UTC = 17:30 EDT (summer) / 16:30 EST (winter),
   # i.e. 23:30 CEST / 22:30 CET.
   schedule: "30 21 * * 1-5"
+  # Retired 2026-09-26: the LLM options pipeline had no edge in backtests (see
+  # backtest/). Replaced by k8s/zerodte-cronjob.yaml. Remove this line to revive.
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

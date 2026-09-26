@@ -8,6 +8,9 @@ spec:
   # (winter), so the last daily bar available here is always the previous
   # session's completed close, exactly as it was on the old post-close schedule.
   schedule: "0 12 * * 1-5"
+  # Retired 2026-09-26: the LLM options pipeline had no edge in backtests (see
+  # backtest/). Replaced by k8s/zerodte-cronjob.yaml. Remove this line to revive.
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

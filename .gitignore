@@ -25,3 +25,6 @@ venv/
 # IDE
 .vscode/settings.json
 .idea/
+
+# Backtest data cache
+.cache/

@@ -8,6 +8,9 @@ spec:
   # 30 min after consensus, still pre-open — 13:00 UTC. Must finish before the
   # earliest possible open (13:30 UTC in summer) so the executor has a fresh batch.
   schedule: "0 13 * * 1-5"
+  # Retired 2026-09-26: the LLM options pipeline had no edge in backtests (see
+  # backtest/). Replaced by k8s/zerodte-cronjob.yaml. Remove this line to revive.
+  suspend: true
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

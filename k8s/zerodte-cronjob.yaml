@@ -1,0 +1,217 @@
+# 0DTE runner — see zerodte/main.py and backtest/zerodte.py.
+#
+# Scheduled in New York time (timeZone, k8s ≥ 1.27), so DST needs no UTC juggling:
+#   enter 10:01 ET — the 9:59 bar has closed; the code also refuses outside 10:00–10:10
+#   exit  15:30 ET — flat before brokers start restricting expiring contracts
+#
+# Trades a SEPARATE paper account started at $1,000, so it isn't mixed with the
+# old pipeline's $100k account. Create its secret once:
+#   kubectl create secret generic alpaca-zerodte-credentials \
+#     --from-literal=api_key=<KEY> --from-literal=secret_key=<SECRET> -n swing-trader
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zerodte-enter
+  namespace: swing-trader
+spec:
+  schedule: "1 10 * * 1-5"
+  timeZone: "America/New_York"
+  startingDeadlineSeconds: 300   # started more than 5 min late → skip, don't enter late
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0  # no retries — must not double-buy
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: zerodte
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
+              imagePullPolicy: Always
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  python -m zerodte.main enter
+                  EXIT=$?
+                  if [ $EXIT -ne 0 ]; then
+                    curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+                      -H 'Content-Type: application/json' \
+                      -d '{"content": "❌ **zerodte-enter** CronJob failed — check k8s logs"}'
+                    exit $EXIT
+                  fi
+              env:
+                - name: ALPACA_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-zerodte-credentials
+                      key: api_key
+                - name: ALPACA_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-zerodte-credentials
+                      key: secret_key
+                - name: ALPACA_BASE_URL
+                  value: "https://paper-api.alpaca.markets"
+                # Free plan: IEX is the real-time stock feed (SIP bars < 15 min old are refused)
+                - name: ALPACA_DATA_FEED
+                  value: "iex"
+                - name: ALPACA_OPTIONS_FEED
+                  value: "indicative"
+                # Premium per trade as a fraction of CURRENT equity — compounds both ways
+                - name: RISK_FRACTION
+                  value: "0.20"
+                - name: PREMIUM_MIN
+                  value: "0.80"
+                - name: PREMIUM_MAX
+                  value: "1.10"
+                - name: TAKE_PROFIT
+                  value: "2.0"
+                - name: MAX_QUOTE_SPREAD
+                  value: "0.05"
+                # PDT: every trade is a same-day round trip; under $25k only 3 per 5 days
+                - name: MAX_DAY_TRADES
+                  value: "3"
+                - name: STATE_DIR
+                  value: "/data/zerodte"
+                - name: DRY_RUN
+                  value: "false"
+                - name: DISCORD_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-secrets
+                      key: approval_webhook_url
+                - name: AUDIT_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_endpoint
+                - name: AUDIT_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_bucket
+                - name: AUDIT_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_access_key
+                - name: AUDIT_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_secret_key
+              volumeMounts:
+                - name: pipeline-data
+                  mountPath: /data
+          volumes:
+            - name: pipeline-data
+              persistentVolumeClaim:
+                claimName: pipeline-data-pvc
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: zerodte-exit
+  namespace: swing-trader
+spec:
+  schedule: "30 15 * * 1-5"
+  timeZone: "America/New_York"
+  startingDeadlineSeconds: 600
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: zerodte
+              image: ghcr.io/sletikkesoren/weekly-swing-trader:latest
+              imagePullPolicy: Always
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  python -m zerodte.main exit
+                  EXIT=$?
+                  if [ $EXIT -ne 0 ]; then
+                    curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+                      -H 'Content-Type: application/json' \
+                      -d '{"content": "❌ **zerodte-exit** CronJob failed — an open 0DTE position may need closing by hand"}'
+                    exit $EXIT
+                  fi
+              env:
+                - name: ALPACA_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-zerodte-credentials
+                      key: api_key
+                - name: ALPACA_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: alpaca-zerodte-credentials
+                      key: secret_key
+                - name: ALPACA_BASE_URL
+                  value: "https://paper-api.alpaca.markets"
+                # Free plan: IEX is the real-time stock feed (SIP bars < 15 min old are refused)
+                - name: ALPACA_DATA_FEED
+                  value: "iex"
+                - name: ALPACA_OPTIONS_FEED
+                  value: "indicative"
+                # Premium per trade as a fraction of CURRENT equity — compounds both ways
+                - name: RISK_FRACTION
+                  value: "0.20"
+                - name: PREMIUM_MIN
+                  value: "0.80"
+                - name: PREMIUM_MAX
+                  value: "1.10"
+                - name: TAKE_PROFIT
+                  value: "2.0"
+                - name: MAX_QUOTE_SPREAD
+                  value: "0.05"
+                # PDT: every trade is a same-day round trip; under $25k only 3 per 5 days
+                - name: MAX_DAY_TRADES
+                  value: "3"
+                - name: STATE_DIR
+                  value: "/data/zerodte"
+                - name: DRY_RUN
+                  value: "false"
+                - name: DISCORD_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-secrets
+                      key: approval_webhook_url
+                - name: AUDIT_S3_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_endpoint
+                - name: AUDIT_S3_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_bucket
+                - name: AUDIT_S3_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_access_key
+                - name: AUDIT_S3_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: audit-secrets
+                      key: s3_secret_key
+              volumeMounts:
+                - name: pipeline-data
+                  mountPath: /data
+          volumes:
+            - name: pipeline-data
+              persistentVolumeClaim:
+                claimName: pipeline-data-pvc
