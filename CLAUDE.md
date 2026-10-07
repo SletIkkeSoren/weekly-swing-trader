@@ -168,8 +168,20 @@ Research only — never imported by a live stage. `pip install -r requirements-b
 - `main.py` — TA signals traded as debit spreads (BS-priced, HV proxy)
 - `shares.py` — RSI-2 pullback with ETF shares vs random-entry baseline
 - `putspread.py` — SPY put credit spreads priced from VIX + skew; sizing is a % of current equity
-- `zerodte.py` — SPY 0DTE on **real** Alpaca minute bars (Feb 2024→). `fetch` needs
-  Alpaca keys, `run [--band 0.80,1.10]` is offline. 2024 is in-sample, 2025→ out-of-sample
+- `zerodte.py` — 0DTE on **real** Alpaca minute bars (Feb 2024→) for SPY, QQQ, IWM, ….
+  `fetch [--ticker QQQ]` needs Alpaca keys, `run [--ticker QQQ] [--band 0.80,1.10]` is
+  offline. 2024 is in-sample, 2025→ out-of-sample
+  - `compare [--tickers SPY,QQQ,IWM]` — the live rule (orb, $0.80–1.10, 2x, 15:30) on each
+    ticker, out-of-sample only: trades, win rate, avg/trade, sequential P&L and max
+    drawdown for $1,000 at 20% of current equity, vs a random-direction baseline (median
+    of 200 seeds), plus how often tickers break out on the same day and in the same direction
+  - Cache: SPY stays in `.cache/backtest/zerodte/*.csv` (pre-multi-ticker layout); other
+    tickers go in `.cache/backtest/zerodte/<TICKER>/`
+  - Strike grid per ticker in `STRIKE_GRIDS` (SPY/QQQ $1, IWM $0.50). It only controls
+    which contracts are fetched, not the rules. Nothing is tuned per ticker
+  - A cached day with no same-day option bars is reported as **uncovered** and skipped,
+    never counted as "no signal". `run`/`compare` print coverage, uncovered days by
+    weekday (to show when daily expiries started) and the strike spacing actually seen
 
 Always compare against a baseline (random entry / buy-and-hold) and judge rules on
 the out-of-sample period only.
@@ -179,7 +191,14 @@ the out-of-sample period only.
 The live strategy: the one rule that held up out-of-sample in `backtest/zerodte.py` —
 opening-range breakout (9:30–9:44 ET range, decided at 10:00 ET) → buy one same-day
 SPY call/put priced $0.80–1.10, limit sell at 2x, sell the rest at 15:30 ET. A near
-break-even, high-variance bet; sized at `RISK_FRACTION` (20%) of **current** equity.
+break-even, high-variance bet; sized at `RISK_FRACTION` (5%) of **current** equity, which
+on $1k is the 1-contract minimum. 20% compounded to ruin out-of-sample (`backtest.zerodte compare`).
+
+Entry order: limit at `PREMIUM_MAX` (top of the band), working until 10:05 ET. It fills at
+the ask, so it only pays above the quote when the price moved — never above the band.
+Bidding the quoted ask for 60s missed fills right after breakouts. Every candidate quote
+(bid/ask and quote time) is stored in the trade's `quotes` field and in the audit trail,
+and a skip names the filter that blocked it (price band, `MAX_QUOTE_SPREAD`, stale quotes).
 
 - `strategy.py` — pure logic (signal, OTM candidates, contract pick, sizing); tested
 - `client.py` — Alpaca REST (clock, account, IEX minute bars, option snapshots, orders)

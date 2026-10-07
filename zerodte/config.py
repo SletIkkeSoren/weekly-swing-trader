@@ -27,7 +27,7 @@ class Config:
             alpaca_base_url=os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
             stock_feed=os.getenv("ALPACA_DATA_FEED", "iex"),
             options_feed=os.getenv("ALPACA_OPTIONS_FEED", "indicative"),
-            risk_fraction=float(os.getenv("RISK_FRACTION", "0.20")),
+            risk_fraction=float(os.getenv("RISK_FRACTION", "0.05")),
             premium_min=float(os.getenv("PREMIUM_MIN", "0.80")),
             premium_max=float(os.getenv("PREMIUM_MAX", "1.10")),
             take_profit=float(os.getenv("TAKE_PROFIT", "2.0")),

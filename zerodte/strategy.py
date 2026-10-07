@@ -15,6 +15,8 @@ ET = ZoneInfo("America/New_York")
 OR_START = time(9, 30)
 OR_END = time(9, 45)        # opening range = bars starting 9:30–9:44
 DECIDE = time(10, 0)        # signal price = close of the 9:59 bar
+ENTRY_END = time(10, 5)     # backtest buys on the first 10:00–10:04 bar; the buy order works until here
+MIN_FILL_SECS = 60
 STRIKE_STEPS = 12           # $1 SPY strikes scanned beyond the money
 
 
@@ -31,6 +33,7 @@ class Quote:
     symbol: str
     bid: float
     ask: float
+    ts: datetime | None = None  # quote time; the free "indicative" feed may lag
 
     @property
     def mid(self) -> float:
@@ -74,6 +77,38 @@ def pick_contract(quotes: list[Quote], premium_min: float, premium_max: float,
           if q.bid > 0 and q.ask > 0 and q.ask - q.bid <= max_spread
           and premium_min <= q.mid <= premium_max]
     return min(ok, key=lambda q: abs(q.mid - target)) if ok else None
+
+
+def describe_quotes(quotes: list[Quote], premium_min: float, premium_max: float,
+                    max_spread: float, now: datetime) -> str:
+    """Why pick_contract found nothing — which filter removed the contracts."""
+    if not quotes:
+        return "no quotes returned"
+    live = [q for q in quotes if q.bid > 0 and q.ask > 0]
+    in_band = [q for q in live if premium_min <= q.mid <= premium_max]
+    parts = [f"{len(quotes)} quotes, {len(live)} two-sided, {len(in_band)} with mid in band"]
+    if in_band:
+        parts.append(f"narrowest in-band spread ${min(q.ask - q.bid for q in in_band):.2f} "
+                     f"(limit ${max_spread:.2f})")
+    elif live:
+        nearest = min(live, key=lambda q: abs(q.mid - (premium_min + premium_max) / 2))
+        parts.append(f"nearest mid ${nearest.mid:.2f} ({nearest.symbol})")
+    ages = [(now - q.ts).total_seconds() for q in quotes if q.ts]
+    if ages:
+        parts.append(f"quote age {min(ages):.0f}–{max(ages):.0f}s")
+    return "; ".join(parts)
+
+
+def quote_log(quotes: list[Quote]) -> list[str]:
+    """Compact, audit-friendly record of every candidate quote."""
+    return [f"{q.symbol} {q.bid:.2f}/{q.ask:.2f}" + (f" @{q.ts:%H:%M:%S}" if q.ts else "")
+            for q in quotes]
+
+
+def fill_wait_secs(now: datetime) -> float:
+    """How long the buy order may work: until ENTRY_END, but never less than MIN_FILL_SECS."""
+    end = datetime.combine(now.date(), ENTRY_END, now.tzinfo)
+    return max((end - now).total_seconds(), MIN_FILL_SECS)
 
 
 def contracts_to_buy(equity: float, buying_power: float, ask: float, risk_fraction: float) -> int:

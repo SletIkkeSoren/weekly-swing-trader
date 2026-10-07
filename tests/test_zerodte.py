@@ -67,6 +67,38 @@ def test_pick_contract_none_in_band():
     assert strategy.pick_contract([Quote("a", 0.30, 0.31)], 0.80, 1.10, 0.05) is None
 
 
+NOW = datetime.combine(DAY, time(10, 1), ET)
+
+
+def test_describe_quotes_names_the_spread_when_it_is_the_blocker():
+    quotes = [Quote("a", 0.90, 1.00, NOW - timedelta(seconds=5)),
+              Quote("b", 0.30, 0.31, NOW - timedelta(seconds=40))]
+    text = strategy.describe_quotes(quotes, 0.80, 1.10, 0.05, NOW)
+    assert "1 with mid in band" in text
+    assert "narrowest in-band spread $0.10 (limit $0.05)" in text
+    assert "quote age 5–40s" in text
+
+
+def test_describe_quotes_names_the_nearest_price_when_nothing_is_in_band():
+    text = strategy.describe_quotes([Quote("a", 0.30, 0.31), Quote("b", 0.0, 0.0)], 0.80, 1.10, 0.05, NOW)
+    assert "1 two-sided, 0 with mid in band" in text and "nearest mid $0.30 (a)" in text
+    assert strategy.describe_quotes([], 0.80, 1.10, 0.05, NOW) == "no quotes returned"
+
+
+def test_quote_log_is_compact():
+    assert strategy.quote_log([Quote("SPY260928C00502000", 0.93, 0.95, NOW)]) == \
+        ["SPY260928C00502000 0.93/0.95 @10:01:00"]
+
+
+@pytest.mark.parametrize("hhmmss,expected", [
+    ((10, 1, 0), 240),      # normal start: works until 10:05
+    ((10, 4, 30), 60),      # never less than a minute
+    ((10, 8, 0), 60),       # late start inside the 10:10 window
+])
+def test_buy_order_works_until_10_05(hhmmss, expected):
+    assert strategy.fill_wait_secs(datetime.combine(DAY, time(*hhmmss), ET)) == expected
+
+
 @pytest.mark.parametrize("equity,bp,ask,expected", [
     (1000, 1000, 0.95, 2),     # 20% of 1000 = 200 → 2 × $95
     (1000, 1000, 1.05, 1),     # 200 // 105 = 1
@@ -82,8 +114,9 @@ def test_contracts_scale_with_equity(equity, bp, ask, expected):
 
 
 class FakeClient:
-    def __init__(self, *, fill=True, tp_fills=False, daytrades=0, bars=None, now_open=True):
+    def __init__(self, *, fill=True, tp_fills=False, daytrades=0, bars=None, now_open=True, quotes=None):
         self.fill, self.tp_fills, self.daytrades = fill, tp_fills, daytrades
+        self.quotes = quotes
         self.bars = bars or _bars(501.0, 499.0, 501.5)
         self.now_open = now_open
         self.orders: dict[str, dict] = {}
@@ -100,15 +133,20 @@ class FakeClient:
     def spy_minute_bars(self, start, end):
         return self.bars
 
+    ask = 0.95
+
     def option_quotes(self, symbols):
-        return [Quote(s, 0.93, 0.95) if i == 3 else Quote(s, 0.10, 0.11) for i, s in enumerate(symbols)]
+        if self.quotes is not None:
+            return self.quotes
+        return [Quote(s, 0.93, self.ask) if i == 3 else Quote(s, 0.10, 0.11) for i, s in enumerate(symbols)]
 
     def submit(self, symbol, qty, side, order_type, limit_price=None):
         oid = f"o{len(self.submitted)}"
         o = {"id": oid, "symbol": symbol, "side": side, "type": order_type, "qty": qty,
              "status": "new", "filled_qty": "0", "filled_avg_price": None, "limit": limit_price}
         if side == "buy" and self.fill:
-            o.update(status="filled", filled_qty=str(qty), filled_avg_price=str(limit_price))
+            # a limit above the ask fills at the ask, like the real broker
+            o.update(status="filled", filled_qty=str(qty), filled_avg_price=str(min(limit_price, self.ask)))
             self.positions[symbol] = qty
         if side == "sell" and order_type == "limit" and self.tp_fills:
             o.update(status="filled", filled_qty=str(qty), filled_avg_price=str(limit_price))
@@ -138,7 +176,7 @@ class FakeClient:
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "datetime", _FrozenDatetime)
     monkeypatch.setattr(runner.audit, "record_zerodte", lambda trades: None)
-    return Config("k", "s", "https://paper", "iex", "indicative", 0.20, 0.80, 1.10, 2.0, 0.05, 3,
+    return Config("k", "s", "https://paper", "iex", "indicative", 0.05, 0.80, 1.10, 2.0, 0.05, 3,
                   str(tmp_path), False, "")
 
 
@@ -156,10 +194,22 @@ def test_enter_buys_breakout_contract_and_places_take_profit(cfg):
     c = FakeClient()
     runner.enter(cfg, c)
     buy, tp = c.submitted
-    assert buy["symbol"] == "SPY260928C00505000" and buy["qty"] == 2 and buy["limit"] == 0.95
-    assert tp["side"] == "sell" and tp["limit"] == 1.90
+    # bids the top of the band, fills at the $0.95 ask; 5% of $1,000 → the 1-contract minimum
+    assert buy["symbol"] == "SPY260928C00505000" and buy["qty"] == 1 and buy["limit"] == 1.10
+    assert tp["side"] == "sell" and tp["limit"] == 1.90      # 2x the fill, not the limit
     s = _state(cfg)
     assert s.status == "open" and s.entry_price == 0.95 and s.tp_order_id == tp["id"]
+    assert s.limit_price == 1.10 and len(s.quotes) == strategy.STRIKE_STEPS
+
+
+def test_skip_records_quotes_and_which_filter_blocked(cfg):
+    sym = "SPY260928C00502000"
+    c = FakeClient(quotes=[Quote(sym, 0.88, 1.00, datetime.combine(DAY, time(10, 0, 50), ET))])
+    runner.enter(cfg, c)
+    s = _state(cfg)
+    assert c.submitted == [] and s.status == "skipped"
+    assert "narrowest in-band spread $0.12" in s.reason and "quote age 10–10s" in s.reason
+    assert s.quotes == [f"{sym} 0.88/1.00 @10:00:50"]
 
 
 def test_enter_twice_never_buys_twice(cfg):
@@ -217,7 +267,7 @@ def test_exit_sells_at_cutoff_when_take_profit_not_hit(cfg):
     s = _state(cfg)
     assert c.orders[s.tp_order_id]["status"] == "canceled"
     assert s.status == "cutoff" and s.exit_price == 0.40
-    assert s.pnl == pytest.approx((0.40 - 0.95) * 100 * 2)
+    assert s.pnl == pytest.approx((0.40 - 0.95) * 100 * 1)
 
 
 def test_exit_records_take_profit_fill(cfg):
@@ -236,3 +286,22 @@ def test_exit_flags_position_closed_elsewhere(cfg):
     runner.exit_(cfg, c)
     s = _state(cfg)
     assert s.status == "error" and s.pnl is None
+
+
+def test_client_parses_quote_time(cfg):
+    import httpx
+    from zerodte.client import ZeroDteClient
+
+    body = {"snapshots": {
+        "SPY260928C00502000": {"latestQuote": {"bp": 0.93, "ap": 0.95, "t": "2026-09-28T14:00:58.123456789Z"}},
+        "SPY260928C00503000": {"latestQuote": {"bp": 0.5, "ap": 0.52}},
+        "SPY260928C00504000": {"latestQuote": {"bp": 0.4, "ap": 0.42, "t": "2026-09-28T14:00:59Z"}},
+        "SPY260928C00505000": {"latestQuote": {"bp": 0.3, "ap": 0.32, "t": "garbage"}},
+    }}
+    client = ZeroDteClient(cfg)
+    client._http = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=body)))
+    quotes = {q.symbol: q for q in client.option_quotes(list(body["snapshots"]))}
+    assert quotes["SPY260928C00502000"].ts.strftime("%H:%M:%S") == "10:00:58"   # ET
+    assert quotes["SPY260928C00503000"].ts is None
+    assert quotes["SPY260928C00504000"].ts.strftime("%H:%M:%S") == "10:00:59"
+    assert quotes["SPY260928C00505000"].ts is None and quotes["SPY260928C00505000"].ask == 0.32

@@ -20,6 +20,8 @@ class ZeroDteTrade(BaseModel):
     tp_order_id: str | None = None
     exit_price: float | None = None     # avg across TP fill and cutoff sale
     equity_before: float | None = None
+    limit_price: float | None = None    # buy limit sent (top of the premium band)
+    quotes: list[str] = []              # every candidate "symbol bid/ask @time" seen at entry
 
     @property
     def pnl(self) -> float | None:

@@ -17,6 +17,18 @@ _DATA_BASE = "https://data.alpaca.markets"
 _TERMINAL = ("filled", "canceled", "expired", "rejected")
 
 
+def _quote_time(raw: str | None) -> datetime | None:
+    """Alpaca stamps quotes in nanoseconds; trim to microseconds. Diagnostic only — never raises."""
+    if not raw:
+        return None
+    try:
+        head, _, frac = raw.rstrip("Z").partition(".")
+        return datetime.fromisoformat(f"{head}.{frac[:6].ljust(6, '0')}+00:00" if frac
+                                      else f"{head}+00:00").astimezone(ET)
+    except ValueError:
+        return None
+
+
 class ZeroDteClient:
     def __init__(self, cfg: Config) -> None:
         self._trading = cfg.alpaca_base_url.rstrip("/")
@@ -49,7 +61,7 @@ class ZeroDteClient:
         quotes = []
         for sym, snap in (r.json().get("snapshots") or {}).items():
             q = snap.get("latestQuote") or {}
-            quotes.append(Quote(sym, float(q.get("bp") or 0), float(q.get("ap") or 0)))
+            quotes.append(Quote(sym, float(q.get("bp") or 0), float(q.get("ap") or 0), _quote_time(q.get("t"))))
         return quotes
 
     def submit(self, symbol: str, qty: int, side: str, order_type: str,

@@ -13,6 +13,11 @@ before any order, each skipping the day loudly rather than guessing:
   - market open, a full session (half days skipped), and now inside 10:00–10:10 ET
   - no state file for today yet (a re-run must never buy twice)
   - PDT: fewer than MAX_DAY_TRADES day trades in the rolling window under $25k
+
+The buy is a limit at PREMIUM_MAX, the top of the band, working until 10:05 ET (the
+backtest's entry window). A limit above the ask fills at the ask, so this only pays
+more than the quote when the price has moved since — never more than the band allows.
+Bidding the quoted ask itself, for 60s, missed fills on the move right after a breakout.
 """
 
 import json
@@ -38,7 +43,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("zerodte")
 
 ENTRY_WINDOW = (time(10, 0), time(10, 10))
-FILL_TIMEOUT_SECS = 60
 PDT_EQUITY = 25_000
 
 
@@ -124,19 +128,26 @@ def enter(cfg: Config, client: ZeroDteClient) -> None:
         return skip(why, equity_before=equity)
 
     quotes = client.option_quotes(strategy.candidate_symbols(today, side, price))
+    seen = strategy.quote_log(quotes)
+    log.info("Candidate quotes: %s", seen)
     pick = strategy.pick_contract(quotes, cfg.premium_min, cfg.premium_max, cfg.max_quote_spread)
     if pick is None:
+        detail = strategy.describe_quotes(quotes, cfg.premium_min, cfg.premium_max,
+                                          cfg.max_quote_spread, datetime.now(ET))
         return skip(f"{why}, but no contract with mid in ${cfg.premium_min:.2f}–{cfg.premium_max:.2f} "
-                    f"and spread ≤ ${cfg.max_quote_spread:.2f}", side=side, equity_before=equity)
+                    f"and spread ≤ ${cfg.max_quote_spread:.2f} ({detail})",
+                    side=side, equity_before=equity, quotes=seen)
 
+    limit = cfg.premium_max
+    # sized at the limit: the most a fill can cost
     qty = strategy.contracts_to_buy(equity, float(acct.get("options_buying_power") or acct["cash"]),
-                                    pick.ask, cfg.risk_fraction)
+                                    limit, cfg.risk_fraction)
     if qty < 1:
-        return skip(f"can't afford 1 × {pick.symbol} at ${pick.ask:.2f}", side=side, symbol=pick.symbol,
-                    equity_before=equity)
+        return skip(f"can't afford 1 × {pick.symbol} at ${limit:.2f}", side=side, symbol=pick.symbol,
+                    equity_before=equity, quotes=seen)
 
     trade = ZeroDteTrade(day=today, status="open", reason=why, side=side, symbol=pick.symbol,
-                         qty=qty, equity_before=equity)
+                         qty=qty, equity_before=equity, limit_price=limit, quotes=seen)
     if cfg.dry_run:
         trade.status, trade.entry_price = "dry_run", pick.ask
         return _finish(cfg, trade, f"🧪 **0DTE {today}** DRY RUN — would buy {qty} × {pick.symbol} "
@@ -144,8 +155,9 @@ def enter(cfg: Config, client: ZeroDteClient) -> None:
 
     # Write state before ordering: a crash after this point can't lead to a second buy
     _save(cfg, trade)
-    order = client.submit(pick.symbol, qty, "buy", "limit", pick.ask)
-    order = client.wait_terminal(order["id"], FILL_TIMEOUT_SECS)
+    wait = strategy.fill_wait_secs(datetime.now(ET))
+    order = client.submit(pick.symbol, qty, "buy", "limit", limit)
+    order = client.wait_terminal(order["id"], wait)
     filled = int(float(order.get("filled_qty") or 0))
     if order.get("status") != "filled":
         client.cancel(order["id"])
@@ -153,8 +165,8 @@ def enter(cfg: Config, client: ZeroDteClient) -> None:
         filled = int(float(order.get("filled_qty") or 0))
     if filled == 0:
         trade.status, trade.qty = "unfilled", 0
-        return _finish(cfg, trade, f"⏭️ **0DTE {today}** — limit buy {pick.symbol} @ ${pick.ask:.2f} "
-                                   f"not filled in {FILL_TIMEOUT_SECS}s, no trade")
+        return _finish(cfg, trade, f"⏭️ **0DTE {today}** — limit buy {pick.symbol} @ ${limit:.2f} "
+                                   f"(quoted ask ${pick.ask:.2f}) not filled in {wait:.0f}s, no trade")
 
     trade.qty = filled
     trade.entry_price = float(order["filled_avg_price"])

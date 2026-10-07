@@ -63,7 +63,7 @@ spec:
                   value: "indicative"
                 # Premium per trade as a fraction of CURRENT equity — compounds both ways
                 - name: RISK_FRACTION
-                  value: "0.20"
+                  value: "0.05"   # = the 1-contract minimum at $1k; 0.20 compounded to ruin in the backtest
                 - name: PREMIUM_MIN
                   value: "0.80"
                 - name: PREMIUM_MAX
@@ -167,7 +167,7 @@ spec:
                   value: "indicative"
                 # Premium per trade as a fraction of CURRENT equity — compounds both ways
                 - name: RISK_FRACTION
-                  value: "0.20"
+                  value: "0.05"   # = the 1-contract minimum at $1k; 0.20 compounded to ruin in the backtest
                 - name: PREMIUM_MIN
                   value: "0.80"
                 - name: PREMIUM_MAX
